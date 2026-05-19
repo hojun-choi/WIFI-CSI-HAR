@@ -85,6 +85,23 @@ Install dependencies first if needed:
 pip install -r requirements.txt
 ```
 
+## Run Full-data Baseline
+
+Run the four-model full-data baseline with:
+
+```bash
+python experiments/07_run_full_baseline_all_models.py --epochs 50 --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+If CUDA OOM occurs, retry with `--batch-size 32`.
+
+Expected outputs:
+
+- `results/metrics/baseline_results.csv`
+- `results/figures/baseline_macro_f1.png`
+- `results/figures/baseline_accuracy.png`
+- `results/checkpoints/`
+
 ## Repository Layout
 
 - `original_baseline/`: copied benchmark code preserved for direct comparison with the original implementation.
