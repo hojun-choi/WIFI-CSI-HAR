@@ -56,6 +56,7 @@ def run_training(
     epochs: int,
     learning_rate: float = 1e-3,
     checkpoint_path: str | Path | None = None,
+    use_early_stopping: bool = False,
     patience: int | None = None,
 ) -> dict[str, object]:
     """Run the dry-run training loop and return validation/test metrics."""
@@ -70,6 +71,7 @@ def run_training(
     best_state_dict = deepcopy(model.state_dict())
     best_epoch = 0
     epochs_without_improvement = 0
+    actual_epochs_ran = 0
 
     checkpoint_file: Path | None = None
     if checkpoint_path is not None:
@@ -77,6 +79,7 @@ def run_training(
         ensure_dir(checkpoint_file.parent)
 
     for epoch in range(1, epochs + 1):
+        actual_epochs_ran = epoch
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
         val_loss, val_metrics, _, _ = evaluate_model(model, val_loader, criterion, device)
 
@@ -104,7 +107,7 @@ def run_training(
         else:
             epochs_without_improvement += 1
 
-        if patience is not None and epochs_without_improvement >= patience:
+        if use_early_stopping and patience is not None and epochs_without_improvement >= patience:
             print(
                 f"Early stopping triggered at epoch {epoch} "
                 f"(best_epoch={best_epoch}, patience={patience})"
@@ -117,6 +120,7 @@ def run_training(
     return {
         "best_val_metrics": best_val_metrics or {"accuracy": 0.0, "macro_f1": 0.0, "weighted_f1": 0.0},
         "best_epoch": best_epoch,
+        "actual_epochs_ran": actual_epochs_ran,
         "test_metrics": test_metrics,
         "test_loss": test_loss,
         "test_y_true": y_true,

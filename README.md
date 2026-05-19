@@ -87,19 +87,32 @@ pip install -r requirements.txt
 
 ## Run Full-data Baseline
 
-Run the four-model full-data baseline with:
+Original benchmark epoch policy:
 
 ```bash
-python experiments/07_run_full_baseline_all_models.py --epochs 50 --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+python experiments/07_run_full_baseline_all_models.py --training-mode original_epoch --seed 42 --batch-size 64 --preprocessing per_sample_zscore
 ```
+
+This mode follows the original benchmark's model-specific epoch policy. Early stopping is disabled, but the best checkpoint is still selected by validation `Macro F1`.
+
+Controlled early stopping mode:
+
+```bash
+python experiments/07_run_full_baseline_all_models.py --training-mode early_stopping --epochs 50 --patience 8 --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+This mode is useful for faster controlled experiments. It should not be mixed with `original_epoch` results without clear labeling.
 
 If CUDA OOM occurs, retry with `--batch-size 32`.
 
 Expected outputs:
 
-- `results/metrics/baseline_results.csv`
-- `results/figures/baseline_macro_f1.png`
-- `results/figures/baseline_accuracy.png`
+- `results/metrics/baseline_results_original_epoch.csv`
+- `results/metrics/baseline_results_early_stopping.csv`
+- `results/figures/baseline_original_epoch_macro_f1.png`
+- `results/figures/baseline_original_epoch_accuracy.png`
+- `results/figures/baseline_early_stopping_macro_f1.png`
+- `results/figures/baseline_early_stopping_accuracy.png`
 - `results/checkpoints/`
 
 ## Repository Layout
