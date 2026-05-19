@@ -270,3 +270,12 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 - supplementary figure로 `1 - Macro F1`, `1 - Accuracy` 같은 gap plot을 추가해 near-1.0 구간 차이를 더 명확히 보여줄 수 있다.
 - `Accuracy`와 `F1` 자체는 `0~1` bounded metric이므로 raw metric에 log scale을 직접 쓰지 않는 것이 기본 원칙이다.
 - log scale이 필요하면 `1 - score` 같은 gap metric에만 제한적으로 적용하고, 반드시 `lower is better`를 명시한다.
+
+## 시각화 및 보고서 작성 메모
+
+- `UT-HAR`의 각 sample은 `time step x CSI feature` 형태의 2D matrix이므로 `sample_csi_heatmap.png`는 입력 구조를 직관적으로 보여주는 기본 시각화로 사용한다.
+- 동시에 CSI는 time-series 성격도 가지므로 `sample_csi_lineplot.png`를 추가해 선택한 feature index의 시간축 변화를 waveform처럼 설명한다.
+- full-data baseline 점수는 매우 높기 때문에 main comparison figure는 zoomed y-axis와 value label을 기본으로 사용한다.
+- 차이가 너무 작아 보이면 supplementary figure로 `1 - score` gap plot을 사용한다. 이때 `lower is better`를 명확히 적는다.
+- `Macro F1`는 class-wise degradation을 보기 위한 핵심 metric이므로 본문 figure와 해석에서 우선순위를 높게 둔다.
+- figure regeneration은 `experiments/08_regenerate_figures.py`로 분리해 재현 가능하게 관리하고, full baseline training이 성공적으로 끝난 뒤 자동 호출할 수 있게 유지한다.

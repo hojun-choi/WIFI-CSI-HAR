@@ -205,6 +205,43 @@ def plot_metric_gap_from_one(
     plt.close(fig)
 
 
+def save_sample_csi_lineplot(
+    sample: np.ndarray,
+    output_path,
+    feature_indices: list[int] | None = None,
+) -> Path:
+    """Save a waveform-like CSI view for report-friendly time-series interpretation."""
+    ensure_dir(Path(output_path).parent)
+    sample_array = np.asarray(sample)
+    if sample_array.ndim != 2:
+        raise ValueError(f"Expected a 2D sample array, got shape {sample_array.shape}")
+
+    feature_count = sample_array.shape[1]
+    if feature_indices is None:
+        feature_indices = np.linspace(0, feature_count - 1, num=3, dtype=int).tolist()
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    time_steps = np.arange(sample_array.shape[0])
+    for feature_index in feature_indices:
+        if feature_index < 0 or feature_index >= feature_count:
+            raise ValueError(
+                f"feature index {feature_index} is out of range for sample width {feature_count}"
+            )
+        ax.plot(
+            time_steps,
+            sample_array[:, feature_index],
+            label=f"feature {feature_index}",
+        )
+
+    ax.set_title("UT-HAR Sample CSI Line Plot (train[0])")
+    ax.set_xlabel("Time Step")
+    ax.set_ylabel("CSI Value")
+    ax.legend()
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return Path(output_path)
+
+
 def save_baseline_original_epoch_plots(csv_path, output_dir) -> list[Path]:
     """Generate zoomed and supplementary baseline figures from the original-epoch CSV."""
     frame = pd.read_csv(csv_path)

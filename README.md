@@ -105,6 +105,8 @@ This mode is useful for faster controlled experiments. It should not be mixed wi
 
 If CUDA OOM occurs, retry with `--batch-size 32`.
 
+After a successful full baseline run, report figures are regenerated automatically by default. Use `--no-regenerate-figures` only when you explicitly want to skip that post-processing step.
+
 Expected outputs:
 
 - `results/metrics/baseline_results_original_epoch.csv`
@@ -121,9 +123,21 @@ Expected outputs:
 python experiments/08_regenerate_figures.py
 ```
 
-This command does not run training. It only reads saved CSV files and regenerates report-ready figures.
+This command does not run training. It only reads saved CSV files and regenerates report-ready figures. The same regeneration logic can also be called automatically after `experiments/07_run_full_baseline_all_models.py` finishes successfully.
 
 For high-score metrics, the regenerated figures use a zoomed y-axis and value labels so small differences remain visible. Supplementary gap plots use `1 - score` to make near-1.0 differences easier to explain in the report.
+
+Representative figure outputs include:
+
+- `results/figures/sample_csi_heatmap.png`
+- `results/figures/sample_csi_lineplot.png`
+- `results/figures/baseline_original_epoch_val_test_macro_f1_zoomed.png`
+- `results/figures/baseline_original_epoch_val_test_accuracy_zoomed.png`
+- `results/figures/preprocessing_ablation_val_test_macro_f1_zoomed.png`
+
+`sample_csi_heatmap.png` shows the full `time step x CSI feature` matrix. `sample_csi_lineplot.png` shows selected CSI features over time, which is closer to a waveform view of the signal.
+
+Accuracy and F1 figures use a zoomed y-axis plus value labels because the full-data baseline scores are very high and a raw `0~1` axis hides small but meaningful differences.
 
 ## Repository Layout
 

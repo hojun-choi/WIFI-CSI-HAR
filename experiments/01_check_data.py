@@ -6,6 +6,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.visualization import save_sample_csi_lineplot
+
 
 # Rubric: dataset analysis and preprocessing reliability start with explicit,
 # reproducible paths and expected split sizes.
@@ -157,14 +159,17 @@ def main() -> None:
 
     class_distribution_path = RESULTS_ROOT / "class_distribution.png"
     heatmap_path = RESULTS_ROOT / "sample_csi_heatmap.png"
+    lineplot_path = RESULTS_ROOT / "sample_csi_lineplot.png"
 
     save_class_distribution(labels, class_distribution_path)
     save_sample_heatmap(features["train"], heatmap_path)
+    save_sample_csi_lineplot(features["train"][0], lineplot_path)
 
     print("Verified split sizes:", EXPECTED_SPLIT_SIZES)
     print("Verified label range: 0..6")
     print(f"Saved figure: {class_distribution_path}")
     print(f"Saved figure: {heatmap_path}")
+    print(f"Saved figure: {lineplot_path}")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -48,6 +49,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--patience", type=int, default=8)
     parser.add_argument("--models", nargs="+", default=DEFAULT_MODELS)
     parser.add_argument("--data-root", default="data/UT_HAR")
+    parser.add_argument(
+        "--regenerate-figures",
+        dest="regenerate_figures",
+        action="store_true",
+        help="Regenerate report-ready figures after a successful baseline run.",
+    )
+    parser.add_argument(
+        "--no-regenerate-figures",
+        dest="regenerate_figures",
+        action="store_false",
+        help="Skip automatic figure regeneration after training.",
+    )
+    parser.set_defaults(regenerate_figures=True)
     return parser.parse_args()
 
 
@@ -97,6 +111,21 @@ def write_baseline_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _load_regenerate_figures_callable():
+    module_path = PROJECT_ROOT / "experiments" / "08_regenerate_figures.py"
+    spec = importlib.util.spec_from_file_location("regenerate_figures_module", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load regeneration module from: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    regenerate = getattr(module, "regenerate_report_figures", None)
+    if regenerate is None:
+        raise AttributeError(
+            "regenerate_report_figures() was not found in experiments/08_regenerate_figures.py"
+        )
+    return regenerate
 
 
 def main() -> None:
@@ -269,6 +298,16 @@ def main() -> None:
 
     print(f"Saved baseline results to: {mode_csv_path}")
     print(f"Saved figures under: {figures_dir}")
+
+    if args.regenerate_figures:
+        try:
+            regenerate_report_figures = _load_regenerate_figures_callable()
+            regenerated_files = regenerate_report_figures(PROJECT_ROOT)
+            print("Automatically regenerated report figures:")
+            for file_path in regenerated_files:
+                print(f"- {file_path}")
+        except Exception as exc:
+            print(f"Warning: figure regeneration failed after training: {exc}")
 
 
 if __name__ == "__main__":
