@@ -115,6 +115,16 @@ Expected outputs:
 - `results/figures/baseline_early_stopping_accuracy.png`
 - `results/checkpoints/`
 
+## Regenerate Report Figures
+
+```bash
+python experiments/08_regenerate_figures.py
+```
+
+This command does not run training. It only reads saved CSV files and regenerates report-ready figures.
+
+For high-score metrics, the regenerated figures use a zoomed y-axis and value labels so small differences remain visible. Supplementary gap plots use `1 - score` to make near-1.0 differences easier to explain in the report.
+
 ## Repository Layout
 
 - `original_baseline/`: copied benchmark code preserved for direct comparison with the original implementation.

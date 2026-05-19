@@ -262,3 +262,11 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 4. next: M3 full-data baseline with `training_mode=original_epoch`
 5. then M4 low-data robustness
 6. then M5 augmentation recovery
+
+## 시각화 주의사항
+
+- baseline 성능이 `0.98~0.99`처럼 매우 높으면 `0~1` 전체 y-axis에서는 모델 간 차이가 거의 보이지 않는다.
+- main report figure는 zoomed y-axis와 value label을 사용해 작은 차이도 읽을 수 있게 만든다.
+- supplementary figure로 `1 - Macro F1`, `1 - Accuracy` 같은 gap plot을 추가해 near-1.0 구간 차이를 더 명확히 보여줄 수 있다.
+- `Accuracy`와 `F1` 자체는 `0~1` bounded metric이므로 raw metric에 log scale을 직접 쓰지 않는 것이 기본 원칙이다.
+- log scale이 필요하면 `1 - score` 같은 gap metric에만 제한적으로 적용하고, 반드시 `lower is better`를 명시한다.
