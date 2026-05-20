@@ -240,10 +240,14 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 - [ ] `real_ratio=1.0, 0.5, 0.25, 0.1`
 - [ ] `stratified sampling` 사용
 - [ ] `validation/test` unchanged
+- [ ] default training mode는 `controlled_generalization`
+- [ ] `original_epoch` 결과와 separate CSV/figure로 관리
 
 ### M5. Augmentation recovery
 
 - [ ] augmentation은 training data에만 적용
+- [ ] default training mode는 `controlled_generalization`
+- [ ] `original_epoch` 결과와 separate CSV/figure로 관리
 
 ### M6. Confusion matrix and interpretation
 
@@ -260,8 +264,8 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 2. M2 complete
 3. M2.5 complete
 4. next: M3 full-data baseline with `training_mode=original_epoch`
-5. then M4 low-data robustness
-6. then M5 augmentation recovery
+5. then M4 low-data robustness with `training_mode=controlled_generalization`
+6. then M5 augmentation recovery with `training_mode=controlled_generalization`
 
 ## 시각화 주의사항
 
@@ -279,3 +283,66 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 - 차이가 너무 작아 보이면 supplementary figure로 `1 - score` gap plot을 사용한다. 이때 `lower is better`를 명확히 적는다.
 - `Macro F1`는 class-wise degradation을 보기 위한 핵심 metric이므로 본문 figure와 해석에서 우선순위를 높게 둔다.
 - figure regeneration은 `experiments/08_regenerate_figures.py`로 분리해 재현 가능하게 관리하고, full baseline training이 성공적으로 끝난 뒤 자동 호출할 수 있게 유지한다.
+
+## Controlled Generalization Training Policy
+
+- `original_epoch=200` 정책은 copied benchmark와의 original benchmark-style comparison을 위한 별도 모드로만 유지한다.
+- 이후 `M4 low-data robustness`와 `M5 augmentation recovery`는 `200 epochs`를 기계적으로 반복하지 않고 `controlled_generalization` policy를 기본으로 사용한다.
+- 목적은 validation score가 한두 epoch 흔들린다고 바로 멈추는 것이 아니라, 회복 가능성은 허용하면서도 과적합을 줄이는 것이다.
+- main selection metric은 validation `Macro F1`로 고정한다.
+- best checkpoint는 validation `Macro F1` 기준으로 저장한다.
+- 최종 test evaluation은 마지막 epoch가 아니라 best validation checkpoint로 수행한다.
+- early stopping은 `warmup_epochs`, `patience`, `min_delta`를 함께 사용한다.
+- `warmup_epochs` 이전에는 early stopping을 적용하지 않는다.
+- `patience`는 best score 이후 몇 epoch까지 회복을 기다릴지 정한다.
+- `min_delta`는 매우 작은 fluctuation을 improvement로 오판하지 않게 해 준다.
+- `max_epochs`는 상한선이지 반드시 끝까지 도는 고정 길이가 아니다.
+
+권장 초기값:
+
+- `max_epochs = 100`
+- `warmup_epochs = 20`
+- `patience = 15`
+- `min_delta = 0.001`
+- `batch_size = 64`, CUDA OOM이면 `32`
+- `optimizer = Adam` 또는 `AdamW`
+- `weight_decay = 1e-4`
+- `gradient_clip_norm = 1.0`
+- optional `scheduler = ReduceLROnPlateau` on validation `Macro F1`
+
+low-data setting에서 이 정책이 더 적합한 이유:
+
+- low-data validation score는 sample 수가 적어 fluctuation이 커질 수 있다.
+- naive early stopping은 일시적 하락 구간에서 너무 빨리 멈출 수 있다.
+- fixed `200 epochs`는 training set memorization과 overfitting 위험을 키운다.
+- best-checkpoint selection은 모든 모델을 같은 기준으로 비교하게 해 준다.
+
+## M4 Low-data Robustness 실행 원칙
+
+- `M4`의 핵심 질문은 "real labeled training data가 줄어들 때 어떤 model이 가장 덜 무너지는가?"이다.
+- `M4`는 `controlled_generalization`을 기본 training mode로 사용한다.
+- `original_epoch=200`은 benchmark-style comparison용으로만 남겨 두고, low-data setting에서는 기본값으로 사용하지 않는다.
+- 이유는 fixed `200 epochs`가 특히 low-data setting에서 overfitting을 키울 수 있기 때문이다.
+- `real_ratio`는 train split에만 적용한다.
+- `validation/test`는 full size를 그대로 유지한다.
+- reduced train split은 `stratified sampling`으로 구성한다.
+- 주요 저장 파일은 `results/metrics/low_data_results.csv`이다.
+- 주요 시각화는 `results/figures/low_data_macro_f1.png`, `results/figures/low_data_accuracy.png`, `results/figures/low_data_degradation_macro_f1.png`, `results/figures/low_data_degradation_accuracy.png`이다.
+
+degradation metric 정의:
+
+- `macro_f1_drop = base_test_macro_f1 - test_macro_f1`
+- `macro_f1_retention = test_macro_f1 / base_test_macro_f1`
+- `accuracy_drop = base_test_accuracy - test_accuracy`
+- `accuracy_retention = test_accuracy / base_test_accuracy`
+
+M4 checklist:
+
+- [ ] `real_ratio`는 train data에만 적용한다.
+- [ ] `validation/test`는 unchanged 상태로 유지한다.
+- [ ] `stratified sampling`을 사용한다.
+- [ ] `controlled_generalization`을 사용한다.
+- [ ] `results/metrics/low_data_results.csv`를 생성한다.
+- [ ] low-data figure를 생성한다.
+- [ ] smallest `Macro F1 drop` model을 식별한다.
+- [ ] `real_ratio=0.1`에서 best `Macro F1` model을 식별한다.

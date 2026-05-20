@@ -350,3 +350,81 @@ def save_preprocessing_ablation_plot(csv_path, output_path) -> list[Path]:
         value_labels=True,
     )
     return [main_output, grouped_output]
+
+
+def save_low_data_plots(csv_path, output_dir) -> list[Path]:
+    """Generate low-data robustness figures for report and presentation use."""
+    frame = pd.read_csv(csv_path)
+    output_root = Path(output_dir)
+    ensure_dir(output_root)
+
+    ordered_ratios = [1.0, 0.5, 0.25, 0.1]
+    frame = frame.copy()
+    frame["real_ratio"] = frame["real_ratio"].astype(float)
+    frame["real_ratio_label"] = frame["real_ratio"].map(lambda value: f"{value:g}")
+
+    created_files = [
+        output_root / "low_data_macro_f1.png",
+        output_root / "low_data_accuracy.png",
+        output_root / "low_data_degradation_macro_f1.png",
+        output_root / "low_data_degradation_accuracy.png",
+    ]
+
+    def _plot_line(metric_col: str, output_path: Path, title: str, ylabel: str) -> None:
+        fig, ax = plt.subplots(figsize=(8.5, 5))
+        for model_name, model_df in frame.groupby("model"):
+            ratio_to_value = {
+                float(row["real_ratio"]): float(row[metric_col])
+                for _, row in model_df.iterrows()
+                if pd.notna(row[metric_col])
+            }
+            x_values = [ratio for ratio in ordered_ratios if ratio in ratio_to_value]
+            if not x_values:
+                continue
+            y_values = [ratio_to_value[ratio] for ratio in x_values]
+            ax.plot(x_values, y_values, marker="o", label=str(model_name))
+
+        ax.set_title(title)
+        ax.set_xlabel("Real Training Data Ratio")
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(ordered_ratios)
+        ax.set_xticklabels([f"{ratio:g}" for ratio in ordered_ratios])
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+    _plot_line(
+        metric_col="test_macro_f1",
+        output_path=created_files[0],
+        title="UT-HAR Low-data Robustness (Test Macro F1)",
+        ylabel="Test Macro F1",
+    )
+    _plot_line(
+        metric_col="test_accuracy",
+        output_path=created_files[1],
+        title="UT-HAR Low-data Robustness (Test Accuracy)",
+        ylabel="Test Accuracy",
+    )
+
+    if frame["macro_f1_drop"].notna().any():
+        _plot_line(
+            metric_col="macro_f1_drop",
+            output_path=created_files[2],
+            title="Macro F1 Drop from Full-data Baseline",
+            ylabel="Macro F1 Drop",
+        )
+    else:
+        created_files.pop(2)
+
+    if frame["accuracy_drop"].notna().any():
+        _plot_line(
+            metric_col="accuracy_drop",
+            output_path=created_files[-1],
+            title="Accuracy Drop from Full-data Baseline",
+            ylabel="Accuracy Drop",
+        )
+    else:
+        created_files = [path for path in created_files if path.name != "low_data_degradation_accuracy.png"]
+
+    return created_files

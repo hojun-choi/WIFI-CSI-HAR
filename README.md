@@ -117,6 +117,58 @@ Expected outputs:
 - `results/figures/baseline_early_stopping_accuracy.png`
 - `results/checkpoints/`
 
+## Controlled Generalization Training
+
+From `M4/M5` onward, use `controlled_generalization` mode by default instead of blindly reusing the `200 epoch` benchmark policy. This mode is designed to avoid both overfitting from very long fixed training and premature stopping from naive early stopping.
+
+Recommended command:
+
+```bash
+python experiments/07_run_full_baseline_all_models.py --training-mode controlled_generalization --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+If CUDA OOM occurs, retry with:
+
+```bash
+python experiments/07_run_full_baseline_all_models.py --training-mode controlled_generalization --seed 42 --batch-size 32 --preprocessing per_sample_zscore
+```
+
+Key parameters:
+
+- `max_epochs`: upper bound on training length, recommended default `100`
+- `warmup_epochs`: no early stopping before this many epochs, recommended default `20`
+- `patience`: wait after the best validation score before stopping, recommended default `15`
+- `min_delta`: ignore tiny `Macro F1` fluctuations, recommended default `0.001`
+- `weight_decay`: regularization term, recommended default `1e-4`
+- `gradient_clip_norm`: stabilize training, recommended default `1.0`
+- `scheduler_type`: `plateau` by default for conservative LR reduction
+
+`original_epoch` mode is still available, but only for original benchmark-style comparison with the copied baseline.
+
+## Run Low-data Robustness
+
+Smoke test:
+
+```bash
+python experiments/10_run_low_data_robustness.py --smoke-test --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+Full `M4` run:
+
+```bash
+python experiments/10_run_low_data_robustness.py --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+CUDA OOM fallback:
+
+```bash
+python experiments/10_run_low_data_robustness.py --seed 42 --batch-size 32 --preprocessing per_sample_zscore
+```
+
+This experiment runs `CNN`, `GRU`, `LSTM`, and `CNN_GRU` over `real_ratio` values `1.0`, `0.5`, `0.25`, and `0.1`. It uses `controlled_generalization`, not `original_epoch`.
+
+The validation and test sets remain unchanged. Only the train split is reduced, and the reduced train subset uses stratified sampling. Results are saved to `results/metrics/low_data_results.csv`, and the figures show how performance degrades as `real_ratio` decreases.
+
 ## Regenerate Report Figures
 
 ```bash

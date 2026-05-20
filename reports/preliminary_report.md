@@ -11,7 +11,7 @@
 
 ## 2. 문제 정의 및 동기
 
-Wi-Fi CSI 기반 `Human Activity Recognition`은 여전히 `generalization failure` 문제를 크게 겪는다. CSI signal은 `environment`, `subject`, `device position`, `room layout`, `noise` 변화에 민감하고, 같은 행동이라도 수집 환경이 달라지면 분포가 쉽게 바뀔 수 있다. 따라서 특정 환경에서 높은 성능이 나왔다고 해도, 새로운 환경에서 같은 수준의 성능을 유지하는 것은 어렵다.
+Wi-Fi CSI 기반 `Human Activity Recognition`은 여전히 `generalization failure` 문제를 크게 겪는다. CSI signal은 `environment`, `subject`, `device position`, `room layout`, `noise` 변화에 민감하고, 같은 행동이라도 수집 환경이 달라지면 분포가 쉽게 바뀔 수 있다. 따라서 특정 환경에서 높은 성능이 나왔다고 해도 새로운 환경에서 같은 수준의 성능을 유지하는 것은 어렵다.
 
 또한 새로운 공간이나 배치마다 충분한 `labeled data`를 다시 수집하는 것은 비용이 크다. 그래서 본 프로젝트는 real labeled data가 줄어드는 상황에서 성능 저하를 얼마나 줄일 수 있는지에 초점을 둔다. 구체적으로는 preprocessing, model choice, augmentation이 `low-data generalization`에 어떤 영향을 주는지 분석하려고 한다. 현재 preliminary report에서는 `data check / EDA`, `preprocessing ablation`, `full-data baseline`까지를 정리하고, 이후 `low-data robustness`와 `augmentation recovery` 실험을 이어서 수행할 계획이다.
 
@@ -98,26 +98,61 @@ controlled setting은 다음과 같다.
 
 예비 해석으로는 full-data setting에서는 모든 모델이 매우 높은 성능을 보인다. 현재 결과 기준으로는 `CNN`이 `test Macro F1`와 `test Accuracy`에서 가장 강하게 보인다. 다만 validation score는 거의 포화 수준인 반면 test score는 그보다 낮아, validation-test gap을 어떻게 해석할지 보고서에서 반드시 논의해야 한다. 또한 이 결과만으로 최종 결론을 내리기보다, 이후 `real_ratio`를 줄였을 때 어떤 모델이 덜 무너지는지가 더 중요한 질문이다.
 
-## 7. 현재까지의 해석
+현재 `M3 original_epoch` 결과는 benchmark-style baseline으로 해석해야 한다. 이후 `M4 low-data robustness`와 `M5 augmentation recovery`는 `controlled_generalization` policy를 사용해 진행할 예정이다. 그 이유는 low-data validation score가 흔들릴 수 있기 때문에 너무 단순한 early stopping은 너무 빨리 멈출 수 있고, 반대로 fixed `200 epochs`는 overfitting 위험이 크기 때문이다. 따라서 `warmup_epochs`, `patience`, `min_delta`, best-checkpoint selection을 포함한 controlled policy가 더 공정한 비교에 적합하다.
+
+## 7. Low-data Robustness 결과
+
+| model | real_ratio | test_macro_f1 | macro_f1_drop | macro_f1_retention | test_accuracy |
+|---|---:|---:|---:|---:|---:|
+| CNN | 1.0000 | 0.9595 | 0.0000 | 1.0000 | 0.9720 |
+| CNN | 0.5000 | 0.9551 | 0.0044 | 0.9954 | 0.9700 |
+| CNN | 0.2500 | 0.8627 | 0.0968 | 0.8991 | 0.9080 |
+| CNN | 0.1000 | 0.7196 | 0.2399 | 0.7499 | 0.7840 |
+| CNN_GRU | 1.0000 | 0.9730 | 0.0000 | 1.0000 | 0.9820 |
+| CNN_GRU | 0.5000 | 0.9300 | 0.0431 | 0.9557 | 0.9540 |
+| CNN_GRU | 0.2500 | 0.8761 | 0.0969 | 0.9004 | 0.9180 |
+| CNN_GRU | 0.1000 | 0.7600 | 0.2131 | 0.7810 | 0.8020 |
+| GRU | 1.0000 | 0.9515 | 0.0000 | 1.0000 | 0.9680 |
+| GRU | 0.5000 | 0.9305 | 0.0210 | 0.9779 | 0.9520 |
+| GRU | 0.2500 | 0.8611 | 0.0904 | 0.9050 | 0.9040 |
+| GRU | 0.1000 | 0.7133 | 0.2382 | 0.7497 | 0.7740 |
+| LSTM | 1.0000 | 0.9614 | 0.0000 | 1.0000 | 0.9720 |
+| LSTM | 0.5000 | 0.9059 | 0.0555 | 0.9422 | 0.9260 |
+| LSTM | 0.2500 | 0.8313 | 0.1301 | 0.8646 | 0.8800 |
+| LSTM | 0.1000 | 0.7137 | 0.2478 | 0.7423 | 0.7720 |
+
+현재 low-data 결과의 예비 해석:
+- `real_ratio=0.1`에서 highest `test_macro_f1` model은 `CNN_GRU`이다.
+- `real_ratio=0.1`에서 smallest `macro_f1_drop` model은 `CNN_GRU`이다.
+
+참고 figure:
+
+- `results/figures/low_data_macro_f1.png`
+- `results/figures/low_data_accuracy.png`
+- `results/figures/low_data_degradation_macro_f1.png`
+- `results/figures/low_data_degradation_accuracy.png`
+
+
+## 8. 현재까지의 해석
 
 현재까지의 결과는 전처리 선택이 실제로 중요하다는 점을 보여 준다. `per_sample_zscore`는 low-data controlled setting에서 가장 좋은 `Macro F1`를 보였고, 따라서 main experiments의 기본 policy로 정당화된다. 반면 full-data setting은 상대적으로 쉬운 조건이어서 모든 모델이 강한 성능을 보인다. 즉 full-data에서는 모델 차이가 크지 않게 보일 수 있으며, 진짜 핵심 비교는 `real_ratio`가 `0.5`, `0.25`, `0.1`으로 줄어들 때 어떤 모델이 가장 덜 성능이 저하되는가에 있다.
 
-## 8. 한계점
+## 9. 한계점
 
 - 현재까지는 `UT-HAR` 단일 dataset만 사용했다.
 - full-data baseline은 `200 epochs`를 사용하므로 overfitting 가능성을 함께 논의해야 한다.
-- 아직 `M4`와 `M5` 결과가 없다.
 - augmentation 효과는 아직 평가하지 않았다.
 - 현재 결과는 사실상 `single seed`에 기반한다.
+- low-data robustness 결과는 실험이 완료된 시점에 따라 일부 section이 placeholder일 수 있다.
 
-## 9. 향후 계획
+## 10. 향후 계획
 
 - `M4 Low-data robustness`: `real_ratio=1.0, 0.5, 0.25, 0.1`
 - `M5 Augmentation recovery`: `train-only augmentation`
 - best model에 대한 `confusion matrix` 분석
 - report 및 presentation refinement
 
-## 10. 실행 명령 정리
+## 11. 실행 명령 정리
 
 ```bash
 python experiments/01_check_data.py
@@ -129,6 +164,10 @@ python experiments/06_run_preprocessing_ablation.py --epochs 30 --real-ratio 0.2
 
 ```bash
 python experiments/07_run_full_baseline_all_models.py --training-mode original_epoch --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+```bash
+python experiments/10_run_low_data_robustness.py --seed 42 --batch-size 64 --preprocessing per_sample_zscore
 ```
 
 ```bash
