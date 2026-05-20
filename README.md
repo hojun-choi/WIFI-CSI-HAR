@@ -73,6 +73,27 @@ data/UT_HAR/label/y_test.csv
 
 These files keep the `.csv` extension from the benchmark, but they are NumPy binary files and must be loaded with `np.load`.
 
+## UT-HAR Input Window
+
+Each UT-HAR sample has shape `(250, 90)`.
+
+- `250 timesteps` are interpreted in this processed benchmark as `CSI frame` indices.
+- `90 CSI features` can be interpreted in `Intel 5300 NIC` style CSI layout as `30 subcarriers x 3 antenna pairs`.
+- Therefore, one sample contains `250 CSI frames`.
+
+The exact real-time duration depends on `sampling_rate`.
+
+- `duration_seconds = 250 / sampling_rate`
+
+This repository reports `CSI frame count` directly as the rigorous quantity. A `100Hz` conversion may be shown only as an optional illustrative estimate, not as a confirmed ground-truth timing for UT-HAR.
+
+## Current Project Status
+
+- `Stage 0`, `M2`, `M2.5`, `M3`, and `M4` are complete.
+- `M4 low-data robustness` is complete and its outputs are stored under `results/metrics/low_data_results.csv` and the `results/figures/low_data_*.png` files.
+- `M5 augmentation recovery` is the next planned step.
+- `M5` is not complete yet.
+
 ## Quick Start
 
 ```bash
@@ -168,6 +189,10 @@ python experiments/10_run_low_data_robustness.py --seed 42 --batch-size 32 --pre
 This experiment runs `CNN`, `GRU`, `LSTM`, and `CNN_GRU` over `real_ratio` values `1.0`, `0.5`, `0.25`, and `0.1`. It uses `controlled_generalization`, not `original_epoch`.
 
 The validation and test sets remain unchanged. Only the train split is reduced, and the reduced train subset uses stratified sampling. Results are saved to `results/metrics/low_data_results.csv`, and the figures show how performance degrades as `real_ratio` decreases.
+
+## Next: Augmentation Recovery
+
+`M5 augmentation recovery` is planned next. It is not complete yet, and this repository should not claim augmentation results until `augmentation=true` runs, `augmentation_results.csv`, and augmentation comparison figures are generated.
 
 ## Regenerate Report Figures
 

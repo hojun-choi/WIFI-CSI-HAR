@@ -13,7 +13,7 @@
 
 Wi-Fi CSI 기반 `Human Activity Recognition`은 여전히 `generalization failure` 문제를 크게 겪는다. CSI signal은 `environment`, `subject`, `device position`, `room layout`, `noise` 변화에 민감하고, 같은 행동이라도 수집 환경이 달라지면 분포가 쉽게 바뀔 수 있다. 따라서 특정 환경에서 높은 성능이 나왔다고 해도 새로운 환경에서 같은 수준의 성능을 유지하는 것은 어렵다.
 
-또한 새로운 공간이나 배치마다 충분한 `labeled data`를 다시 수집하는 것은 비용이 크다. 그래서 본 프로젝트는 real labeled data가 줄어드는 상황에서 성능 저하를 얼마나 줄일 수 있는지에 초점을 둔다. 구체적으로는 preprocessing, model choice, augmentation이 `low-data generalization`에 어떤 영향을 주는지 분석하려고 한다. 현재 preliminary report에서는 `data check / EDA`, `preprocessing ablation`, `full-data baseline`까지를 정리하고, 이후 `low-data robustness`와 `augmentation recovery` 실험을 이어서 수행할 계획이다.
+또한 새로운 공간이나 배치마다 충분한 `labeled data`를 다시 수집하는 것은 비용이 크다. 그래서 본 프로젝트는 real labeled data가 줄어드는 상황에서 성능 저하를 얼마나 줄일 수 있는지에 초점을 둔다. 구체적으로는 preprocessing, model choice, augmentation이 `low-data generalization`에 어떤 영향을 주는지 분석하려고 한다. 현재 preliminary report에서는 `data check / EDA`, `preprocessing ablation`, `full-data baseline`, `low-data robustness`까지를 정리하고, 이후 `augmentation recovery` 실험을 이어서 수행할 계획이다.
 
 ## 3. Dataset 설명
 
@@ -27,7 +27,36 @@ Wi-Fi CSI 기반 `Human Activity Recognition`은 여전히 `generalization failu
 
 class distribution은 완전히 균등하지 않다. 따라서 단순 `Accuracy`만 보면 특정 class의 성능 저하를 놓칠 수 있어 `Macro F1`를 주요 metric으로 사용한다. 또한 각 sample이 `time x CSI feature` 구조를 가지므로, heatmap은 전체 행렬 구조를 보여주고 line plot은 일부 feature의 시간축 변화를 보여주는 보완적 시각화가 된다.
 
-## 4. 전처리
+## 4. 입력 window와 CSI frame 수
+
+- one sample은 `250 timesteps x 90 CSI features` 구조를 가진다.
+- `X_train=(3977, 250, 90)`, `X_val=(496, 250, 90)`, `X_test=(500, 250, 90)`이므로 본 processed benchmark에서는 timestep을 `CSI frame index`로 해석한다.
+- `90 CSI features`는 `Intel 5300 NIC` style CSI layout 관점에서 `30 subcarriers x 3 antenna pairs = 90 features`로 해석할 수 있다.
+- 따라서 one training sample에는 `250 CSI frames`가 포함된다.
+
+### Total CSI frame count by real_ratio
+
+| real_ratio | selected_train_size | timesteps_per_sample | total_train_csi_frames |
+|---:|---:|---:|---:|
+| 1 | 3977 | 250 | 994250 |
+| 0.5 | 1987 | 250 | 496750 |
+| 0.25 | 992 | 250 | 248000 |
+| 0.1 | 395 | 250 | 98750 |
+
+### 100Hz 가정 시 추정 시간
+
+| real_ratio | selected_train_size | estimated_duration_at_100Hz_seconds | estimated_duration_at_100Hz_minutes |
+|---:|---:|---:|---:|
+| 1 | 3977 | 9942.5 | 165.7 |
+| 0.5 | 1987 | 4967.5 | 82.8 |
+| 0.25 | 992 | 2480.0 | 41.3 |
+| 0.1 | 395 | 987.5 | 16.5 |
+
+이 시간 환산은 `sampling_rate=100Hz`라는 가정에 기반한 예시이며, 본 processed benchmark의 실제 `sampling_rate`를 확정하는 의미는 아니다. 따라서 본 보고서의 주 분석은 시간 길이가 아니라 `CSI frame count`와 `real_ratio` 기준으로 수행한다.
+
+`real_ratio`가 줄어들면 selected training sample 수가 감소하고, 각 sample이 `250 CSI frames`를 포함하므로 total training `CSI frame` budget도 함께 감소한다. 이는 곧 "labeled CSI frame budget이 줄어들 때 model 성능이 얼마나 유지되는가?"라는 low-data generalization 문제의식과 직접 연결된다.
+
+## 5. 전처리
 
 전처리는 `none`, `train_global_zscore`, `per_sample_zscore` 세 가지를 비교했다.
 
@@ -57,7 +86,7 @@ controlled setting은 다음과 같다.
 - `results/figures/preprocessing_ablation_macro_f1.png`
 - `results/figures/preprocessing_ablation_val_test_macro_f1_zoomed.png`
 
-## 5. 모델 선택
+## 6. 모델 선택
 
 본 프로젝트는 leaderboard-style benchmark가 아니다. 모델을 무작정 많이 늘리는 대신, 해석 가능한 비교를 위해 대표적인 네 가지 구조만 선택했다.
 
@@ -68,7 +97,7 @@ controlled setting은 다음과 같다.
 
 이 네 모델은 `CNN-only`, `RNN-only`, `hybrid` 구조를 모두 포함하면서도 비교 결과를 설명하기 쉽다. `Transformer` 계열은 흥미로운 future work이지만, 현재 단계에서는 low-data robustness와 interpretability가 핵심이므로 main scope에 넣지 않았다.
 
-## 6. Full-data Baseline 실험
+## 7. Full-data Baseline 실험
 
 현재 full-data baseline 설정은 다음과 같다.
 
@@ -98,7 +127,7 @@ controlled setting은 다음과 같다.
 
 예비 해석으로는 full-data setting에서는 모든 모델이 매우 높은 성능을 보인다. 현재 결과 기준으로는 `CNN`이 `test Macro F1`와 `test Accuracy`에서 가장 강하게 보인다. 다만 validation score는 거의 포화 수준인 반면 test score는 그보다 낮아, validation-test gap을 어떻게 해석할지 보고서에서 반드시 논의해야 한다. 또한 이 결과만으로 최종 결론을 내리기보다, 이후 `real_ratio`를 줄였을 때 어떤 모델이 덜 무너지는지가 더 중요한 질문이다.
 
-현재 `M3 original_epoch` 결과는 benchmark-style baseline으로 해석해야 한다. 이후 `M4 low-data robustness`와 `M5 augmentation recovery`는 `controlled_generalization` policy를 사용해 진행할 예정이다. 그 이유는 low-data validation score가 흔들릴 수 있기 때문에 너무 단순한 early stopping은 너무 빨리 멈출 수 있고, 반대로 fixed `200 epochs`는 overfitting 위험이 크기 때문이다. 따라서 `warmup_epochs`, `patience`, `min_delta`, best-checkpoint selection을 포함한 controlled policy가 더 공정한 비교에 적합하다.
+현재 `M3 original_epoch` 결과는 benchmark-style baseline으로 해석해야 한다. 이후 `M4 low-data robustness`와 `M5 augmentation recovery`는 `controlled_generalization` policy를 사용해 진행한다. 그 이유는 low-data validation이 흔들릴 수 있기 때문에 너무 단순한 early stopping은 너무 빨리 멈출 수 있고, 반대로 fixed `200 epochs`는 overfitting 위험이 크기 때문이다.
 
 ## 7. Low-data Robustness 결과
 
@@ -143,11 +172,10 @@ controlled setting은 다음과 같다.
 - full-data baseline은 `200 epochs`를 사용하므로 overfitting 가능성을 함께 논의해야 한다.
 - augmentation 효과는 아직 평가하지 않았다.
 - 현재 결과는 사실상 `single seed`에 기반한다.
-- low-data robustness 결과는 실험이 완료된 시점에 따라 일부 section이 placeholder일 수 있다.
+- 시간 길이 해석은 `sampling_rate`가 확정되지 않았으므로 가정 기반 보조 설명으로만 사용한다.
 
 ## 10. 향후 계획
 
-- `M4 Low-data robustness`: `real_ratio=1.0, 0.5, 0.25, 0.1`
 - `M5 Augmentation recovery`: `train-only augmentation`
 - best model에 대한 `confusion matrix` 분석
 - report 및 presentation refinement

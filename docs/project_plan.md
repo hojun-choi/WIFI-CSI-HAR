@@ -220,6 +220,19 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 
 ### M3. Full-data baseline
 
+- 최신 상태:
+- [x] `CNN`, `GRU`, `LSTM`, `CNN+GRU`를 동일한 full-data 조건에서 실행했다.
+- [x] `real_ratio=1.0`
+- [x] `augmentation=false`
+- [x] main original-style comparison은 `training_mode=original_epoch`로 수행했다.
+- [x] `original_epoch`에서는 `early stopping`을 사용하지 않았다.
+- [x] model-specific epochs는 `original_baseline` 기준으로 매핑했다.
+- [x] best validation checkpoint를 `Macro F1` 기준으로 저장했다.
+- [x] `results/metrics/baseline_results_original_epoch.csv`를 생성했다.
+- [x] zoomed baseline figure를 생성했다.
+
+- 아래 미체크 항목은 초기 초안 메모이며 현재 상태를 나타내지 않는다.
+
 - [ ] `CNN`, `GRU`, `LSTM`, `CNN+GRU`가 동일 조건에서 실행된다.
 - [ ] `real_ratio=1.0`
 - [ ] `augmentation=false`
@@ -237,6 +250,19 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 
 ### M4. Low-data robustness
 
+- 최신 상태:
+- [x] `real_ratio=1.0, 0.5, 0.25, 0.1`를 모두 실행했다.
+- [x] `real_ratio`는 train split에만 적용했다.
+- [x] `validation/test`는 unchanged로 유지했다.
+- [x] `stratified sampling`을 사용했다.
+- [x] `controlled_generalization`을 사용했다.
+- [x] `results/metrics/low_data_results.csv`를 생성했다.
+- [x] low-data figure를 생성했다.
+- [x] degradation metrics를 계산했다.
+- [x] `real_ratio=0.1` 기준 핵심 해석을 report builder에 반영했다.
+
+- 아래 미체크 항목은 초기 초안 메모이며 현재 상태를 나타내지 않는다.
+
 - [ ] `real_ratio=1.0, 0.5, 0.25, 0.1`
 - [ ] `stratified sampling` 사용
 - [ ] `validation/test` unchanged
@@ -244,6 +270,15 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 - [ ] `original_epoch` 결과와 separate CSV/figure로 관리
 
 ### M5. Augmentation recovery
+
+- 최신 상태:
+- [ ] train-only augmentation implemented for M5
+- [ ] `augmentation=true` runs completed
+- [ ] `augmentation_results.csv` generated
+- [ ] augmentation improvement figures generated
+- [ ] augmentation recovery interpretation completed
+
+- 아래 미체크 항목은 초기 초안 메모이며, M5는 아직 시작 전 상태다.
 
 - [ ] augmentation은 training data에만 적용
 - [ ] default training mode는 `controlled_generalization`
@@ -263,9 +298,10 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 1. Stage 0 complete
 2. M2 complete
 3. M2.5 complete
-4. next: M3 full-data baseline with `training_mode=original_epoch`
-5. then M4 low-data robustness with `training_mode=controlled_generalization`
-6. then M5 augmentation recovery with `training_mode=controlled_generalization`
+4. M3 complete
+5. M4 complete
+6. next: M5 augmentation recovery with `training_mode=controlled_generalization`
+7. then M6 confusion matrix and final analysis
 
 ## 시각화 주의사항
 
@@ -346,3 +382,41 @@ M4 checklist:
 - [ ] low-data figure를 생성한다.
 - [ ] smallest `Macro F1 drop` model을 식별한다.
 - [ ] `real_ratio=0.1`에서 best `Macro F1` model을 식별한다.
+
+## 현재 진행 상태
+
+| Stage | Status | Main artifacts |
+|---|---|---|
+| Stage 0 | complete | `results/figures/class_distribution.png`, `results/figures/sample_csi_heatmap.png`, `results/figures/sample_csi_lineplot.png` |
+| M2 | complete | `results/metrics/dry_run_results.csv` |
+| M2.5 | complete | `results/metrics/preprocessing_ablation_results.csv` |
+| M3 | complete | `results/metrics/baseline_results_original_epoch.csv` |
+| M4 | complete | `results/metrics/low_data_results.csv`, `results/figures/low_data_macro_f1.png`, `results/figures/low_data_accuracy.png`, `results/figures/low_data_degradation_macro_f1.png`, `results/figures/low_data_degradation_accuracy.png` |
+| M5 | planned, not run yet | augmentation recovery artifacts do not exist yet |
+| M6 | planned, not run yet | confusion matrix / final analysis artifacts do not exist yet |
+
+## 입력 window / CSI frame 해석
+
+- one sample은 `250 timesteps x 90 CSI features` 구조를 가진다.
+- 본 processed benchmark에서는 timestep을 `CSI frame index`로 해석한다.
+- `90 CSI features`는 `Intel 5300 NIC` style CSI layout 관점에서 `30 subcarriers x 3 antenna pairs = 90 features`로 설명할 수 있다.
+- 따라서 one sample에는 `250 CSI frames`가 포함된다.
+- `real_ratio`는 selected training sample 수를 줄이는 동시에 total training `CSI frame` budget도 줄인다고 해석할 수 있다.
+- 본 프로젝트에서는 `CSI frame count`를 엄밀한 양으로 사용한다.
+- 시간 길이는 `sampling_rate`가 있어야 계산할 수 있으므로 가정 기반 estimate로만 사용한다.
+
+공식:
+
+- `sample_duration = 250 / fs` seconds
+- `total_training_duration = selected_train_size x 250 / fs` seconds
+
+가정 기반 예시:
+
+- `fs=100Hz`라고 가정하면 one sample은 약 `2.5 seconds`
+- full train: `3977 samples = 994,250 frames ≈ 9,942.5 seconds ≈ 165.7 minutes`
+- `10% train`: `395 samples = 98,750 frames ≈ 987.5 seconds ≈ 16.5 minutes`
+
+주의:
+
+- 위 시간 환산은 `sampling_rate=100Hz`라는 예시적 가정일 뿐이며, 본 processed benchmark의 실제 `sampling_rate`를 확정하는 의미는 아니다.
+- 따라서 `M4`의 `real_ratio`는 selected sample ratio이면서 동시에 selected `CSI frame budget` ratio로도 해석할 수 있지만, 보고서의 주 분석은 frame count와 performance degradation 기준으로 수행한다.
