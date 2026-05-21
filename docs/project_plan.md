@@ -272,10 +272,18 @@ M3 full-data baseline은 이제 두 가지 실행 정책을 가진다.
 ### M5. Augmentation recovery
 
 - 최신 상태:
+- M5는 아직 full run이 완료되지 않았고, 다음 단계에서 `controlled_generalization` 기준으로 수행한다.
+- augmentation은 반드시 training data에만 적용하고, `validation/test`에는 절대 적용하지 않는다.
+- M5의 핵심 비교 대상은 `results/metrics/low_data_results.csv`에 저장된 M4 no-augmentation baseline이다.
 - [ ] train-only augmentation implemented for M5
+- [ ] validation/test augmentation disabled
+- [ ] augmentation smoke test completed
 - [ ] `augmentation=true` runs completed
 - [ ] `augmentation_results.csv` generated
+- [ ] `augmentation_gain_macro_f1` calculated
 - [ ] augmentation improvement figures generated
+- [ ] best augmentation gain model identified
+- [ ] cases where augmentation hurts identified
 - [ ] augmentation recovery interpretation completed
 
 - 아래 미체크 항목은 초기 초안 메모이며, M5는 아직 시작 전 상태다.

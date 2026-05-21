@@ -1,25 +1,52 @@
-"""UT-HAR dataset utilities for the clean project-specific pipeline.
+"""UT-HAR dataset utilities for the clean project-specific pipeline."""
 
-This module will hold the final dataset loader so preprocessing stays explicit
-and reproducible for the report.
-"""
-
-# Rubric: this module will own dataset loading, tensor conversion, and
-# train-based normalization so preprocessing remains auditable in the report.
+# Rubric: this module owns dataset loading, tensor conversion, train-based
+# normalization, and train-only augmentation so preprocessing stays auditable.
 
 from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 
+from src.data.augmentations import UTHARAugmenter, resolve_augmentation_config
 from src.data.sampling import stratified_indices
 
 
 EPSILON = 1e-6
+
+
+class UTHARDataset(Dataset):
+    """Array-backed dataset with optional train-only on-the-fly augmentation."""
+
+    def __init__(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        augmenter: UTHARAugmenter | None = None,
+        seed: int = 42,
+    ) -> None:
+        self.X = np.asarray(X, dtype=np.float32)
+        self.y = np.asarray(y, dtype=np.int64)
+        self.augmenter = augmenter
+        self.rng = np.random.default_rng(seed)
+
+    def __len__(self) -> int:
+        return len(self.y)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        sample = self.X[index]
+        if self.augmenter is not None:
+            # Rubric: augmentation is applied only here on the train dataset so
+            # validation/test metrics remain clean and leakage-free.
+            sample = self.augmenter(sample, self.rng)
+        features = torch.from_numpy(np.asarray(sample, dtype=np.float32))
+        label = torch.tensor(int(self.y[index]), dtype=torch.long)
+        return features, label
 
 
 def _load_numpy_binary(path: Path) -> np.ndarray:
@@ -30,7 +57,7 @@ def _load_numpy_binary(path: Path) -> np.ndarray:
 def load_uthar_arrays(data_root: str | Path) -> dict[str, np.ndarray]:
     """Load all UT-HAR arrays from disk using np.load."""
     root = Path(data_root)
-    arrays = {
+    return {
         "X_train": _load_numpy_binary(root / "data" / "X_train.csv"),
         "X_val": _load_numpy_binary(root / "data" / "X_val.csv"),
         "X_test": _load_numpy_binary(root / "data" / "X_test.csv"),
@@ -38,7 +65,6 @@ def load_uthar_arrays(data_root: str | Path) -> dict[str, np.ndarray]:
         "y_val": _load_numpy_binary(root / "label" / "y_val.csv"),
         "y_test": _load_numpy_binary(root / "label" / "y_test.csv"),
     }
-    return arrays
 
 
 def _per_sample_zscore(X: np.ndarray) -> np.ndarray:
@@ -60,7 +86,7 @@ def apply_preprocessing(
 
     if preprocessing == "train_global_zscore":
         # Rubric: train-based normalization prevents validation/test leakage by
-        # restricting statistics to X_train before applying them to all splits.
+        # restricting statistics to the selected train split only.
         train_mean = float(X_train.mean())
         train_std = float(X_train.std())
         X_train_proc = (X_train - train_mean) / (train_std + EPSILON)
@@ -95,20 +121,19 @@ def make_tensor_datasets(
     y_val: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
-) -> tuple[TensorDataset, TensorDataset, TensorDataset]:
-    """Convert UT-HAR arrays to TensorDataset objects."""
-    train_dataset = TensorDataset(
-        torch.from_numpy(X_train.astype(np.float32)),
-        torch.from_numpy(y_train.astype(np.int64)),
-    )
-    val_dataset = TensorDataset(
-        torch.from_numpy(X_val.astype(np.float32)),
-        torch.from_numpy(y_val.astype(np.int64)),
-    )
-    test_dataset = TensorDataset(
-        torch.from_numpy(X_test.astype(np.float32)),
-        torch.from_numpy(y_test.astype(np.int64)),
-    )
+    augmentation: bool = False,
+    augmentation_config: dict[str, Any] | None = None,
+    seed: int = 42,
+) -> tuple[Dataset, Dataset, Dataset]:
+    """Convert UT-HAR arrays to Dataset objects."""
+    augmenter = None
+    if augmentation:
+        augmenter = UTHARAugmenter(augmentation_config)
+
+    train_dataset = UTHARDataset(X_train, y_train, augmenter=augmenter, seed=seed)
+    # Rubric: validation/test are always built from non-augmented arrays.
+    val_dataset = UTHARDataset(X_val, y_val, augmenter=None, seed=seed)
+    test_dataset = UTHARDataset(X_test, y_test, augmenter=None, seed=seed)
     return train_dataset, val_dataset, test_dataset
 
 
@@ -132,12 +157,14 @@ def create_uthar_dataloaders(
     real_ratio: float,
     seed: int,
     model_type: str = "GRU",
+    augmentation: bool = False,
+    augmentation_config: dict[str, Any] | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader, dict[str, object]]:
-    """Create UT-HAR dataloaders for dry-run and later experiments."""
+    """Create UT-HAR dataloaders for dry-runs and later experiments."""
     arrays = load_uthar_arrays(data_root)
     full_X_train = arrays["X_train"]
     full_y_train = arrays["y_train"]
-    X_train, y_train, selected_indices = _sample_training_data(
+    X_train, y_train, _ = _sample_training_data(
         full_X_train,
         full_y_train,
         real_ratio=real_ratio,
@@ -148,8 +175,8 @@ def create_uthar_dataloaders(
     X_test = arrays["X_test"]
     y_test = arrays["y_test"]
 
-    # Rubric: apply preprocessing only after train subset selection so
-    # normalization statistics come from the actual training data in use.
+    # Rubric: preprocessing is applied after low-data sampling so the train
+    # subset alone defines normalization statistics.
     X_train_proc, X_val_proc, X_test_proc, preprocessing_metadata = apply_preprocessing(
         X_train,
         X_val,
@@ -157,6 +184,9 @@ def create_uthar_dataloaders(
         preprocessing=preprocessing,
     )
 
+    resolved_augmentation_config = (
+        resolve_augmentation_config(augmentation_config) if augmentation else {}
+    )
     train_dataset, val_dataset, test_dataset = make_tensor_datasets(
         X_train_proc,
         y_train,
@@ -164,9 +194,19 @@ def create_uthar_dataloaders(
         y_val,
         X_test_proc,
         y_test,
+        augmentation=augmentation,
+        augmentation_config=resolved_augmentation_config if augmentation else None,
+        seed=seed,
     )
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_generator = torch.Generator()
+    train_generator.manual_seed(seed)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        generator=train_generator,
+    )
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
@@ -178,16 +218,18 @@ def create_uthar_dataloaders(
         "model_type": model_type,
         "num_classes": 7,
         "input_shape": tuple(X_train_proc.shape[1:]),
-        # Rubric: validation/test are kept unchanged for fair comparison across
-        # preprocessing candidates and later low-data experiments.
         "train_size": len(train_dataset),
         "selected_train_size": len(train_dataset),
         "full_train_size": len(full_X_train),
+        # Rubric: validation/test are kept unchanged for fair low-data and M5
+        # augmentation comparisons.
         "val_size": len(val_dataset),
         "test_size": len(test_dataset),
         "real_ratio": real_ratio,
         "preprocessing": preprocessing,
         "preprocessing_metadata": preprocessing_metadata,
+        "augmentation": augmentation,
+        "augmentation_config": resolved_augmentation_config,
         "class_counts_selected": class_counts_selected,
     }
     return train_loader, val_loader, test_loader, metadata

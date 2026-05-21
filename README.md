@@ -190,6 +190,35 @@ This experiment runs `CNN`, `GRU`, `LSTM`, and `CNN_GRU` over `real_ratio` value
 
 The validation and test sets remain unchanged. Only the train split is reduced, and the reduced train subset uses stratified sampling. Results are saved to `results/metrics/low_data_results.csv`, and the figures show how performance degrades as `real_ratio` decreases.
 
+## Run Augmentation Recovery
+
+Smoke test:
+
+```bash
+python experiments/11_run_augmentation_recovery.py --smoke-test --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+Full `M5` run:
+
+```bash
+python experiments/11_run_augmentation_recovery.py --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+CUDA OOM fallback:
+
+```bash
+python experiments/11_run_augmentation_recovery.py --seed 42 --batch-size 32 --preprocessing per_sample_zscore
+```
+
+This experiment runs `CNN`, `GRU`, `LSTM`, and `CNN_GRU` over `real_ratio` values `0.5`, `0.25`, and `0.1`. It uses `train-only augmentation` with `controlled_generalization`, compares the augmented results against `results/metrics/low_data_results.csv`, and never augments validation/test data.
+
+Results are saved to `results/metrics/augmentation_results.csv`, and the figures summarize both augmentation recovery and augmentation gain:
+
+- `results/figures/augmentation_recovery_macro_f1.png`
+- `results/figures/augmentation_recovery_accuracy.png`
+- `results/figures/augmentation_gain_macro_f1.png`
+- `results/figures/augmentation_gain_accuracy.png`
+
 ## Next: Augmentation Recovery
 
 `M5 augmentation recovery` is planned next. It is not complete yet, and this repository should not claim augmentation results until `augmentation=true` runs, `augmentation_results.csv`, and augmentation comparison figures are generated.

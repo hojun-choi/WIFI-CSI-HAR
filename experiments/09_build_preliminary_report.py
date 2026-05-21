@@ -198,6 +198,86 @@ def _build_low_data_section(rows: list[dict[str, str]]) -> str:
     return "\n".join(lines + interpretation_lines) + "\n"
 
 
+def _build_augmentation_section(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return """## 8. Augmentation Recovery 결과
+
+`results/metrics/augmentation_results.csv`가 아직 없으므로 본 섹션은 planned 상태다. 다음 단계에서는 `real_ratio=0.5, 0.25, 0.1`에 대해 `CNN`, `GRU`, `LSTM`, `CNN_GRU`를 대상으로 `train-only augmentation`이 M4 no-augmentation baseline 대비 성능을 얼마나 회복시키는지 비교할 예정이다.
+"""
+
+    ordered = _ordered_low_data_rows(rows)
+    lines = [
+        "## 8. Augmentation Recovery 결과",
+        "",
+        "본 섹션은 M5 Augmentation recovery의 완료된 결과를 요약한다. 모든 비교는 `results/metrics/low_data_results.csv`의 no-augmentation baseline 대비 augmentation gain 기준으로 해석한다.",
+        "",
+        "| model | real_ratio | no_aug_test_macro_f1 | test_macro_f1 | augmentation_gain_macro_f1 | no_aug_test_accuracy | test_accuracy | augmentation_gain_accuracy |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for row in ordered:
+        lines.append(
+            f"| {row['model']} | {_format_float(row['real_ratio'])} | "
+            f"{_format_float(row.get('no_aug_test_macro_f1'))} | {_format_float(row['test_macro_f1'])} | "
+            f"{_format_float(row.get('augmentation_gain_macro_f1'))} | {_format_float(row.get('no_aug_test_accuracy'))} | "
+            f"{_format_float(row['test_accuracy'])} | {_format_float(row.get('augmentation_gain_accuracy'))} |"
+        )
+
+    interpretation_lines = ["", "현재 augmentation recovery 결과의 예비 해석:"]
+    valid_gain_rows = [
+        row for row in rows if row.get("augmentation_gain_macro_f1") not in ("", None)
+    ]
+    if valid_gain_rows:
+        largest_positive = max(valid_gain_rows, key=lambda row: float(row["augmentation_gain_macro_f1"]))
+        hurt_rows = [row for row in valid_gain_rows if float(row["augmentation_gain_macro_f1"]) < 0.0]
+        ratio_mean_gains: dict[float, list[float]] = {}
+        for row in valid_gain_rows:
+            ratio = float(row["real_ratio"])
+            ratio_mean_gains.setdefault(ratio, []).append(float(row["augmentation_gain_macro_f1"]))
+        best_ratio = None
+        if ratio_mean_gains:
+            best_ratio = max(
+                ratio_mean_gains.items(),
+                key=lambda item: sum(item[1]) / len(item[1]),
+            )[0]
+        interpretation_lines.append(
+            f"- largest positive `augmentation_gain_macro_f1`는 `{largest_positive['model']}` at `real_ratio={float(largest_positive['real_ratio']):g}`이다."
+        )
+        if hurt_rows:
+            hurt_descriptions = ", ".join(
+                f"{row['model']}@{float(row['real_ratio']):g}"
+                for row in sorted(
+                    hurt_rows,
+                    key=lambda row: (float(row["real_ratio"]), row["model"]),
+                )
+            )
+            interpretation_lines.append(
+                f"- augmentation이 성능을 악화시킨 경우도 있으며, 현재 결과에서는 {hurt_descriptions}를 추가 해석 대상으로 본다."
+            )
+        else:
+            interpretation_lines.append("- 현재 결과에서는 `augmentation_gain_macro_f1 < 0`인 뚜렷한 case가 없다.")
+        if best_ratio is not None:
+            interpretation_lines.append(
+                f"- 평균 `augmentation_gain_macro_f1` 기준으로 augmentation은 `real_ratio={best_ratio:g}`에서 가장 유용했다."
+            )
+    else:
+        interpretation_lines.append(
+            "- gain column이 아직 계산되지 않았으므로 augmentation 효과 해석은 M5 결과가 저장된 뒤 갱신해야 한다."
+        )
+
+    interpretation_lines.extend(
+        [
+            "",
+            "참고 figure:",
+            "",
+            "- `results/figures/augmentation_recovery_macro_f1.png`",
+            "- `results/figures/augmentation_recovery_accuracy.png`",
+            "- `results/figures/augmentation_gain_macro_f1.png`",
+            "- `results/figures/augmentation_gain_accuracy.png`",
+        ]
+    )
+    return "\n".join(lines + interpretation_lines) + "\n"
+
+
 def build_preliminary_report(project_root: Path | None = None) -> Path:
     root = project_root or PROJECT_ROOT
     report_path = root / "reports" / "preliminary_report.md"
@@ -210,10 +290,12 @@ def build_preliminary_report(project_root: Path | None = None) -> Path:
         root / "results" / "metrics" / "baseline_results_original_epoch.csv"
     )
     low_data_rows = _read_csv_rows(root / "results" / "metrics" / "low_data_results.csv")
+    augmentation_rows = _read_csv_rows(root / "results" / "metrics" / "augmentation_results.csv")
 
     preprocessing_table = _build_preprocessing_table(preprocessing_rows)
     baseline_table = _build_baseline_table(baseline_rows)
     low_data_section = _build_low_data_section(low_data_rows)
+    augmentation_section = _build_augmentation_section(augmentation_rows)
     frame_count_table = build_frame_count_table(low_data_rows)
     duration_estimate_table = build_duration_estimate_table(low_data_rows, fs=100)
     baseline_device = baseline_rows[0]["device"] if baseline_rows else "device 확인 필요"
@@ -332,25 +414,27 @@ controlled setting은 다음과 같다.
 
 {low_data_section}
 
-## 8. 현재까지의 해석
+{augmentation_section}
+
+## 9. 현재까지의 해석
 
 현재까지의 결과는 전처리 선택이 실제로 중요하다는 점을 보여 준다. `per_sample_zscore`는 low-data controlled setting에서 가장 좋은 `Macro F1`를 보였고, 따라서 main experiments의 기본 policy로 정당화된다. 반면 full-data setting은 상대적으로 쉬운 조건이어서 모든 모델이 강한 성능을 보인다. 즉 full-data에서는 모델 차이가 크지 않게 보일 수 있으며, 진짜 핵심 비교는 `real_ratio`가 `0.5`, `0.25`, `0.1`으로 줄어들 때 어떤 모델이 가장 덜 성능이 저하되는가에 있다.
 
-## 9. 한계점
+## 10. 한계점
 
 - 현재까지는 `UT-HAR` 단일 dataset만 사용했다.
 - full-data baseline은 `200 epochs`를 사용하므로 overfitting 가능성을 함께 논의해야 한다.
-- augmentation 효과는 아직 평가하지 않았다.
+- `augmentation_results.csv`가 없으면 augmentation 효과는 아직 평가하지 않은 상태로 남는다.
 - 현재 결과는 사실상 `single seed`에 기반한다.
 - 시간 길이 해석은 `sampling_rate`가 확정되지 않았으므로 가정 기반 보조 설명으로만 사용한다.
 
-## 10. 향후 계획
+## 11. 향후 계획
 
 - `M5 Augmentation recovery`: `train-only augmentation`
 - best model에 대한 `confusion matrix` 분석
 - report 및 presentation refinement
 
-## 11. 실행 명령 정리
+## 12. 실행 명령 정리
 
 ```bash
 python experiments/01_check_data.py
@@ -366,6 +450,10 @@ python experiments/07_run_full_baseline_all_models.py --training-mode original_e
 
 ```bash
 python experiments/10_run_low_data_robustness.py --seed 42 --batch-size 64 --preprocessing per_sample_zscore
+```
+
+```bash
+python experiments/11_run_augmentation_recovery.py --seed 42 --batch-size 64 --preprocessing per_sample_zscore
 ```
 
 ```bash

@@ -428,3 +428,122 @@ def save_low_data_plots(csv_path, output_dir) -> list[Path]:
         created_files = [path for path in created_files if path.name != "low_data_degradation_accuracy.png"]
 
     return created_files
+
+
+def save_augmentation_recovery_plots(aug_csv_path, low_data_csv_path, output_dir) -> list[Path]:
+    """Generate M5 figures by comparing augmentation against M4 no-aug results."""
+    aug_frame = pd.read_csv(aug_csv_path)
+    low_data_frame = pd.read_csv(low_data_csv_path) if Path(low_data_csv_path).exists() else pd.DataFrame()
+    output_root = Path(output_dir)
+    ensure_dir(output_root)
+
+    created_files = [
+        output_root / "augmentation_recovery_macro_f1.png",
+        output_root / "augmentation_recovery_accuracy.png",
+        output_root / "augmentation_gain_macro_f1.png",
+        output_root / "augmentation_gain_accuracy.png",
+    ]
+
+    ordered_ratios = [0.5, 0.25, 0.1]
+
+    def _ordered_series(frame: pd.DataFrame, metric_col: str, model_name: str) -> tuple[list[float], list[float]]:
+        model_df = frame[frame["model"] == model_name].copy()
+        if model_df.empty or metric_col not in model_df.columns:
+            return [], []
+        ratio_to_value = {
+            float(row["real_ratio"]): float(row[metric_col])
+            for _, row in model_df.iterrows()
+            if pd.notna(row.get(metric_col))
+        }
+        x_values = [ratio for ratio in ordered_ratios if ratio in ratio_to_value]
+        y_values = [ratio_to_value[ratio] for ratio in x_values]
+        return x_values, y_values
+
+    def _plot_recovery(metric_col: str, output_path: Path, title: str, ylabel: str) -> None:
+        fig, ax = plt.subplots(figsize=(9, 5))
+        all_models = sorted(set(aug_frame["model"].astype(str).tolist()))
+        color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+
+        for idx, model_name in enumerate(all_models):
+            color = color_cycle[idx % len(color_cycle)] if color_cycle else None
+            x_no_aug, y_no_aug = _ordered_series(low_data_frame, metric_col, model_name)
+            x_aug, y_aug = _ordered_series(aug_frame, metric_col, model_name)
+            if x_no_aug:
+                ax.plot(
+                    x_no_aug,
+                    y_no_aug,
+                    marker="o",
+                    linestyle="--",
+                    color=color,
+                    label=f"{model_name} (no aug)",
+                )
+            if x_aug:
+                ax.plot(
+                    x_aug,
+                    y_aug,
+                    marker="o",
+                    linestyle="-",
+                    color=color,
+                    label=f"{model_name} (aug)",
+                )
+
+        ax.set_title(title)
+        ax.set_xlabel("Real Training Data Ratio")
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(ordered_ratios)
+        ax.set_xticklabels([f"{ratio:g}" for ratio in ordered_ratios])
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(ncol=2, fontsize=9)
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+    def _plot_gain(metric_col: str, output_path: Path, title: str, ylabel: str) -> None:
+        fig, ax = plt.subplots(figsize=(8.5, 5))
+        for model_name, model_df in aug_frame.groupby("model"):
+            ratio_to_value = {
+                float(row["real_ratio"]): float(row[metric_col])
+                for _, row in model_df.iterrows()
+                if metric_col in row and pd.notna(row[metric_col])
+            }
+            x_values = [ratio for ratio in ordered_ratios if ratio in ratio_to_value]
+            if not x_values:
+                continue
+            y_values = [ratio_to_value[ratio] for ratio in x_values]
+            ax.plot(x_values, y_values, marker="o", label=str(model_name))
+
+        ax.axhline(0.0, color="black", linewidth=1.0, linestyle=":")
+        ax.set_title(title)
+        ax.set_xlabel("Real Training Data Ratio")
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(ordered_ratios)
+        ax.set_xticklabels([f"{ratio:g}" for ratio in ordered_ratios])
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+    _plot_recovery(
+        metric_col="test_macro_f1",
+        output_path=created_files[0],
+        title="Augmentation Recovery on UT-HAR (Test Macro F1)",
+        ylabel="Test Macro F1",
+    )
+    _plot_recovery(
+        metric_col="test_accuracy",
+        output_path=created_files[1],
+        title="Augmentation Recovery on UT-HAR (Test Accuracy)",
+        ylabel="Test Accuracy",
+    )
+    _plot_gain(
+        metric_col="augmentation_gain_macro_f1",
+        output_path=created_files[2],
+        title="Augmentation Gain on UT-HAR (Macro F1, positive is better)",
+        ylabel="Augmentation Gain (Macro F1)",
+    )
+    _plot_gain(
+        metric_col="augmentation_gain_accuracy",
+        output_path=created_files[3],
+        title="Augmentation Gain on UT-HAR (Accuracy, positive is better)",
+        ylabel="Augmentation Gain (Accuracy)",
+    )
+    return created_files
