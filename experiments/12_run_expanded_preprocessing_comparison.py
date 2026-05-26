@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +48,7 @@ def parse_args() -> argparse.Namespace:
         description="Run F2 expanded preprocessing comparison on UT-HAR"
     )
     parser.add_argument("--model", default=None, help="Single benchmark rank 1 model alias.")
-    parser.add_argument("--models", nargs="+", default=["GRU"])
+    parser.add_argument("--models", nargs="+", default=None)
     parser.add_argument(
         "--use-benchmark-rank1",
         action="store_true",
@@ -106,6 +107,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", default="data/UT_HAR")
     parser.add_argument("--output-prefix", default="final")
     parser.add_argument("--smoke-test", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--disable-regenerate-figures", action="store_true")
     return parser.parse_args()
 
@@ -195,21 +198,36 @@ def _resolve_smoke_test(args: argparse.Namespace) -> None:
     args.epochs = 5
 
 
-def _resolve_models(args: argparse.Namespace) -> list[str]:
-    models = list(args.models)
+def _resolve_models(args: argparse.Namespace) -> tuple[list[str], str | None]:
+    benchmark_rank1 = resolve_rank1_model(PROJECT_ROOT) if args.use_benchmark_rank1 else None
+    if args.use_benchmark_rank1 and benchmark_rank1 is None:
+        raise ValueError("Run F1 original benchmark and benchmark selection first.")
+
+    if args.use_benchmark_rank1 and (args.models is not None or args.model is not None):
+        raise ValueError(
+            "--use-benchmark-rank1 cannot be combined with --model or --models. "
+            "It must resolve to exactly one benchmark rank 1 model."
+        )
+
     if args.use_benchmark_rank1:
-        benchmark_rank1 = resolve_rank1_model(PROJECT_ROOT)
-        if benchmark_rank1 is None:
-            raise ValueError("Run F1 original benchmark and benchmark selection first.")
-        models.append(benchmark_rank1)
+        normalized_rank1 = normalize_model_name(benchmark_rank1)
+        return [normalized_rank1], normalized_rank1
+
+    models: list[str] = []
+    if args.models:
+        models.extend(args.models)
     if args.model:
         models.append(args.model)
+
+    if not models:
+        models = ["GRU"]
+
     normalized = [normalize_model_name(model_name) for model_name in models]
     unique_models: list[str] = []
     for model_name in normalized:
         if model_name not in unique_models:
             unique_models.append(model_name)
-    return unique_models
+    return unique_models, benchmark_rank1
 
 
 def _resolve_experiment_plan(
@@ -255,6 +273,54 @@ def _output_csv_path(metrics_dir: Path, output_prefix: str, comparison_mode: str
     return metrics_dir / f"{output_prefix}_preprocessing_results.csv"
 
 
+def _check_existing_output_file(
+    csv_path: Path,
+    final_models_to_run: list[str],
+    overwrite: bool,
+    smoke_test: bool,
+    dry_run: bool,
+) -> str | None:
+    if smoke_test or not csv_path.exists():
+        return None
+    if overwrite:
+        print(f"Overwriting existing official output file: {csv_path}")
+        return None
+
+    try:
+        frame = pd.read_csv(csv_path)
+    except Exception as exc:
+        message = (
+            f"Existing official result file could not be read: {csv_path}. "
+            "Delete it or rerun with --overwrite."
+        )
+        if dry_run:
+            return message
+        raise RuntimeError(message) from exc
+
+    existing_models = []
+    if "model" in frame.columns:
+        existing_models = sorted(frame["model"].dropna().astype(str).unique().tolist())
+    target_models = sorted(final_models_to_run)
+
+    if existing_models and existing_models != target_models:
+        message = (
+            "Existing official preprocessing result file conflicts with the current model set. "
+            f"existing_models={existing_models}, final_models_to_run={target_models}. "
+            "Delete results/metrics/final_preprocessing_results.csv or rerun with --overwrite."
+        )
+        if dry_run:
+            return message
+        raise RuntimeError(message)
+
+    message = (
+        f"Official output file already exists: {csv_path}. "
+        "Delete the stale partial results or rerun with --overwrite before starting the official F2 run."
+    )
+    if dry_run:
+        return message
+    raise RuntimeError(message)
+
+
 def main() -> None:
     args = parse_args()
     _resolve_smoke_test(args)
@@ -263,7 +329,7 @@ def main() -> None:
         args.use_benchmark_rank1 = False
 
     user_explicitly_set_model = ("--model" in sys.argv) or ("--models" in sys.argv)
-    models = _resolve_models(args)
+    models, resolved_rank1_model = _resolve_models(args)
     if not models:
         raise ValueError("At least one model must be provided via --model or --models.")
     if not args.smoke_test and not args.use_benchmark_rank1 and not user_explicitly_set_model:
@@ -277,16 +343,29 @@ def main() -> None:
         raise ValueError("F2 preprocessing comparison must use controlled_generalization.")
     if args.epochs <= 0:
         raise ValueError("epochs must be positive.")
+    if args.use_benchmark_rank1 and models != [resolved_rank1_model]:
+        raise RuntimeError(
+            "Resolved benchmark rank 1 run is inconsistent. "
+            f"resolved_rank1_model={resolved_rank1_model}, final_models_to_run={models}"
+        )
 
     plan = _resolve_experiment_plan(
         comparison_mode=args.comparison_mode,
         preprocessings=args.preprocessings,
         combinations=args.combinations,
     )
+    metrics_dir = PROJECT_ROOT / "results" / "metrics"
+    csv_path = _output_csv_path(
+        metrics_dir=metrics_dir,
+        output_prefix=args.output_prefix,
+        comparison_mode=args.comparison_mode,
+        smoke_test=args.smoke_test,
+    )
     resolved_config = {
         "experiment": "expanded_preprocessing_comparison",
-        "models": models,
         "use_benchmark_rank1": args.use_benchmark_rank1,
+        "resolved_rank1_model": resolved_rank1_model,
+        "final_models_to_run": models,
         "comparison_mode": args.comparison_mode,
         "real_ratio": args.real_ratio,
         "preprocessings": args.preprocessings,
@@ -302,9 +381,26 @@ def main() -> None:
         "gradient_clip_norm": args.gradient_clip_norm,
         "scheduler_type": args.scheduler_type,
         "smoke_test": args.smoke_test,
+        "dry_run": args.dry_run,
+        "output_csv_path": str(csv_path),
+        "checkpoint_dir": str(PROJECT_ROOT / "results" / "checkpoints"),
     }
     print("Resolved config:")
-    print(resolved_config)
+    print(json.dumps(resolved_config, indent=2))
+
+    existing_output_warning = _check_existing_output_file(
+        csv_path=csv_path,
+        final_models_to_run=models,
+        overwrite=args.overwrite,
+        smoke_test=args.smoke_test,
+        dry_run=args.dry_run,
+    )
+    if existing_output_warning is not None:
+        print(f"Output file check: {existing_output_warning}")
+
+    if args.dry_run:
+        print("Dry-run mode: exiting before training.")
+        return
 
     device = get_device()
     rows: list[dict[str, object]] = []
@@ -409,13 +505,6 @@ def main() -> None:
             str(row["model"]),
             -float(row["val_macro_f1"]),
         )
-    )
-    metrics_dir = PROJECT_ROOT / "results" / "metrics"
-    csv_path = _output_csv_path(
-        metrics_dir=metrics_dir,
-        output_prefix=args.output_prefix,
-        comparison_mode=args.comparison_mode,
-        smoke_test=args.smoke_test,
     )
     _write_results_csv(csv_path, rows)
     print(f"Saved preprocessing results to: {csv_path}")
