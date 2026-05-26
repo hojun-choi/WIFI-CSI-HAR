@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -12,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.visualization import (
     save_augmentation_recovery_plots,
     save_baseline_original_epoch_plots,
+    save_final_preprocessing_plots,
     save_low_data_plots,
     save_preprocessing_ablation_plot,
     save_sample_csi_lineplot,
@@ -29,6 +32,10 @@ def regenerate_report_figures(project_root: Path | None = None) -> list[Path]:
     low_data_csv = root / "results" / "metrics" / "low_data_results.csv"
     augmentation_csv = root / "results" / "metrics" / "augmentation_results.csv"
     preprocessing_csv = root / "results" / "metrics" / "preprocessing_ablation_results.csv"
+    final_preprocessing_csv = root / "results" / "metrics" / "final_preprocessing_results.csv"
+    final_preprocessing_combination_csv = (
+        root / "results" / "metrics" / "final_preprocessing_combination_results.csv"
+    )
     sample_path = root / "data" / "UT_HAR" / "data" / "X_train.csv"
     figures_dir = root / "results" / "figures"
 
@@ -64,6 +71,38 @@ def regenerate_report_figures(project_root: Path | None = None) -> list[Path]:
         )
     else:
         print(f"Skipped preprocessing figures because CSV was not found: {preprocessing_csv}")
+
+    if final_preprocessing_csv.exists() or final_preprocessing_combination_csv.exists():
+        if final_preprocessing_csv.exists() and final_preprocessing_combination_csv.exists():
+            merged_frame = pd.concat(
+                [
+                    pd.read_csv(final_preprocessing_csv),
+                    pd.read_csv(final_preprocessing_combination_csv),
+                ],
+                ignore_index=True,
+            )
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".csv",
+                delete=False,
+                encoding="utf-8",
+                newline="",
+            ) as temp_file:
+                merged_frame.to_csv(temp_file.name, index=False)
+                created_files.extend(save_final_preprocessing_plots(temp_file.name, figures_dir))
+            Path(temp_file.name).unlink(missing_ok=True)
+        else:
+            source_csv = (
+                final_preprocessing_csv
+                if final_preprocessing_csv.exists()
+                else final_preprocessing_combination_csv
+            )
+            created_files.extend(save_final_preprocessing_plots(source_csv, figures_dir))
+    else:
+        print(
+            "Skipped final preprocessing figures because neither official CSV was found: "
+            f"{final_preprocessing_csv}"
+        )
 
     if sample_path.exists():
         sample_array = _load_numpy_binary(sample_path)

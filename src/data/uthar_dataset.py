@@ -14,10 +14,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from src.data.augmentations import UTHARAugmenter, resolve_augmentation_config
+from src.data.preprocessing import apply_preprocessing
 from src.data.sampling import stratified_indices
-
-
-EPSILON = 1e-6
 
 
 class UTHARDataset(Dataset):
@@ -67,53 +65,6 @@ def load_uthar_arrays(data_root: str | Path) -> dict[str, np.ndarray]:
     }
 
 
-def _per_sample_zscore(X: np.ndarray) -> np.ndarray:
-    sample_mean = X.mean(axis=(1, 2), keepdims=True)
-    sample_std = X.std(axis=(1, 2), keepdims=True)
-    return (X - sample_mean) / (sample_std + EPSILON)
-
-
-def apply_preprocessing(
-    X_train: np.ndarray,
-    X_val: np.ndarray,
-    X_test: np.ndarray,
-    preprocessing: str,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, float | str]]:
-    """Apply the selected preprocessing policy to UT-HAR features."""
-    if preprocessing == "none":
-        metadata = {"preprocessing": preprocessing}
-        return X_train.copy(), X_val.copy(), X_test.copy(), metadata
-
-    if preprocessing == "train_global_zscore":
-        # Rubric: train-based normalization prevents validation/test leakage by
-        # restricting statistics to the selected train split only.
-        train_mean = float(X_train.mean())
-        train_std = float(X_train.std())
-        X_train_proc = (X_train - train_mean) / (train_std + EPSILON)
-        X_val_proc = (X_val - train_mean) / (train_std + EPSILON)
-        X_test_proc = (X_test - train_mean) / (train_std + EPSILON)
-        metadata = {
-            "preprocessing": preprocessing,
-            "train_mean": train_mean,
-            "train_std": train_std,
-        }
-        return X_train_proc, X_val_proc, X_test_proc, metadata
-
-    if preprocessing == "per_sample_zscore":
-        metadata = {"preprocessing": preprocessing}
-        return (
-            _per_sample_zscore(X_train),
-            _per_sample_zscore(X_val),
-            _per_sample_zscore(X_test),
-            metadata,
-        )
-
-    raise ValueError(
-        f"Unsupported preprocessing: {preprocessing}. "
-        "Choose from ['none', 'train_global_zscore', 'per_sample_zscore']."
-    )
-
-
 def make_tensor_datasets(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -159,6 +110,7 @@ def create_uthar_dataloaders(
     model_type: str = "GRU",
     augmentation: bool = False,
     augmentation_config: dict[str, Any] | None = None,
+    preprocessing_config: dict[str, Any] | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader, dict[str, object]]:
     """Create UT-HAR dataloaders for dry-runs and later experiments."""
     arrays = load_uthar_arrays(data_root)
@@ -177,11 +129,12 @@ def create_uthar_dataloaders(
 
     # Rubric: preprocessing is applied after low-data sampling so the train
     # subset alone defines normalization statistics.
-    X_train_proc, X_val_proc, X_test_proc, preprocessing_metadata = apply_preprocessing(
+    X_train_proc, X_val_proc, X_test_proc, preprocessing_bundle = apply_preprocessing(
         X_train,
         X_val,
         X_test,
         preprocessing=preprocessing,
+        preprocessing_config=preprocessing_config,
     )
 
     resolved_augmentation_config = (
@@ -226,8 +179,10 @@ def create_uthar_dataloaders(
         "val_size": len(val_dataset),
         "test_size": len(test_dataset),
         "real_ratio": real_ratio,
-        "preprocessing": preprocessing,
-        "preprocessing_metadata": preprocessing_metadata,
+        "preprocessing": preprocessing_bundle["preprocessing"],
+        "preprocessing_steps": preprocessing_bundle["preprocessing_steps"],
+        "preprocessing_config": preprocessing_bundle["preprocessing_config"],
+        "preprocessing_metadata": preprocessing_bundle["preprocessing_metadata"],
         "augmentation": augmentation,
         "augmentation_config": resolved_augmentation_config,
         "class_counts_selected": class_counts_selected,

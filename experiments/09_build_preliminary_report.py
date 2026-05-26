@@ -43,7 +43,7 @@ def build_frame_count_table(low_data_rows: list[dict[str, str]]) -> str:
     if not low_data_rows:
         return (
             "`results/metrics/low_data_results.csv`가 아직 없으므로 frame count 표는 "
-            "M4 실행 후 자동으로 채워질 예정이다."
+            "공식 low-data run 이후 자동으로 채워질 예정이다."
         )
 
     grouped: dict[float, dict[str, str]] = {}
@@ -71,7 +71,7 @@ def build_duration_estimate_table(low_data_rows: list[dict[str, str]], fs: int =
     if not low_data_rows:
         return (
             "`results/metrics/low_data_results.csv`가 아직 없으므로 100Hz 가정 시간 표는 "
-            "M4 실행 후 자동으로 채워질 예정이다."
+            "공식 low-data run 이후 자동으로 채워질 예정이다."
         )
 
     grouped: dict[float, dict[str, str]] = {}
@@ -98,7 +98,7 @@ def build_duration_estimate_table(low_data_rows: list[dict[str, str]], fs: int =
 
 def _build_preprocessing_table(rows: list[dict[str, str]]) -> str:
     if not rows:
-        return "전처리 결과 CSV가 없어 표를 아직 채우지 못했다."
+        return "`results/metrics/preprocessing_ablation_results.csv`가 없어 preprocessing 표를 만들지 못했다."
 
     ordered = sorted(rows, key=lambda row: float(row["val_macro_f1"]), reverse=True)
     lines = [
@@ -113,11 +113,65 @@ def _build_preprocessing_table(rows: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def _build_final_preprocessing_table(rows: list[dict[str, str]]) -> str:
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            float(row["val_macro_f1"]),
+            float(row["test_macro_f1"]),
+        ),
+        reverse=True,
+    )
+    lines = [
+        "| preprocessing_group | model | preprocessing | val_macro_f1 | test_macro_f1 | val_accuracy | test_accuracy |",
+        "|---|---|---|---:|---:|---:|---:|",
+    ]
+    for row in ordered:
+        lines.append(
+            f"| {row['preprocessing_group']} | {row['model']} | {row['preprocessing']} | "
+            f"{_format_float(row['val_macro_f1'])} | {_format_float(row['test_macro_f1'])} | "
+            f"{_format_float(row['val_accuracy'])} | {_format_float(row['test_accuracy'])} |"
+        )
+    return "\n".join(lines)
+
+
+def _build_final_preprocessing_section(
+    rows: list[dict[str, str]],
+    decision_exists: bool,
+) -> str:
+    if not rows:
+        return """## 6. Final Workflow - Expanded Preprocessing Comparison
+
+F2 expanded preprocessing comparison has not been run yet.
+"""
+
+    ordered = sorted(rows, key=lambda row: float(row["val_macro_f1"]), reverse=True)
+    best_row = ordered[0]
+    decision_note = (
+        "`docs/final_preprocessing_decision.md` exists."
+        if decision_exists
+        else "`docs/final_preprocessing_decision.md` does not exist yet."
+    )
+    return f"""## 6. Final Workflow - Expanded Preprocessing Comparison
+
+The table below summarizes official revised-workflow F2 outputs only. This section does not use `preprocessing_ablation_results.csv` as final evidence.
+
+{_build_final_preprocessing_table(rows)}
+
+- best preprocessing by validation `Macro F1`: `{best_row['preprocessing']}`
+- preprocessing group: `{best_row['preprocessing_group']}`
+- model: `{best_row['model']}`
+- selection rule: validation `Macro F1`
+- test `Macro F1` is used for confirmation only.
+- decision document status: {decision_note}
+"""
+
+
 def _build_baseline_table(rows: list[dict[str, str]]) -> str:
     if not rows:
         return (
-            "Full-data baseline 결과 CSV를 읽지 못했다. "
-            "`results/metrics/baseline_results_original_epoch.csv` 생성 후 표를 갱신해야 한다."
+            "`results/metrics/baseline_results_original_epoch.csv`가 없어 benchmark 표를 만들지 못했다. "
+            "F1 official rerun 이후 갱신이 필요하다."
         )
 
     lines = [
@@ -135,16 +189,16 @@ def _build_baseline_table(rows: list[dict[str, str]]) -> str:
 
 def _build_low_data_section(rows: list[dict[str, str]]) -> str:
     if not rows:
-        return """## 7. Low-data Robustness 결과
+        return """## 7. Prototype Low-data Robustness Snapshot
 
-`results/metrics/low_data_results.csv`가 아직 없으므로 본 섹션은 placeholder 상태다. 다음 단계에서는 `real_ratio=1.0, 0.5, 0.25, 0.1`에 대해 `CNN`, `GRU`, `LSTM`, `CNN_GRU`를 `controlled_generalization` policy로 비교해 어떤 model이 가장 덜 성능 저하를 보이는지 분석할 예정이다.
+`results/metrics/low_data_results.csv`가 아직 없으므로 본 섹션은 placeholder 상태다. revised workflow에서는 final preprocessing selection이 완료된 뒤 `real_ratio=1.0, 0.5, 0.25, 0.1`에 대해 official low-data robustness를 다시 실행해야 한다.
 """
 
     ordered = _ordered_low_data_rows(rows)
     lines = [
-        "## 7. Low-data Robustness 결과",
+        "## 7. Prototype Low-data Robustness Snapshot",
         "",
-        "본 섹션은 M4 Low-data Robustness의 완료된 결과를 요약한다. M5 Augmentation recovery는 아직 완료되지 않았으며 다음 단계로 남아 있다.",
+        "본 섹션은 현재 저장된 `results/metrics/low_data_results.csv`를 요약하지만, 이는 revised workflow 기준 final evidence가 아니라 prototype/development snapshot이다. 특히 현재 run은 `per_sample_zscore` 기반이므로 F3에서 final preprocessing이 확정되면 F4 official low-data run을 다시 수행할 수 있다.",
         "",
         "| model | real_ratio | test_macro_f1 | macro_f1_drop | macro_f1_retention | test_accuracy | accuracy_drop | accuracy_retention |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
@@ -158,34 +212,27 @@ def _build_low_data_section(rows: list[dict[str, str]]) -> str:
         )
 
     ratio_01_rows = [row for row in rows if abs(float(row["real_ratio"]) - 0.1) < 1e-9]
-    interpretation_lines = ["", "현재 low-data 결과의 예비 해석:"]
+    interpretation_lines = ["", "현재 prototype low-data 결과에서 읽을 수 있는 제한적 관찰:"]
     if ratio_01_rows:
         best_macro = max(ratio_01_rows, key=lambda row: float(row["test_macro_f1"]))
         valid_drop_rows = [row for row in ratio_01_rows if row.get("macro_f1_drop") not in ("", None)]
+        interpretation_lines.append(
+            f"- `real_ratio=0.1`에서 highest `test_macro_f1` model은 `{best_macro['model']}`이다."
+        )
         if valid_drop_rows:
             smallest_drop = min(valid_drop_rows, key=lambda row: float(row["macro_f1_drop"]))
             interpretation_lines.append(
-                f"- `real_ratio=0.1`에서 highest `test_macro_f1` model은 `{best_macro['model']}`이다."
-            )
-            interpretation_lines.append(
                 f"- `real_ratio=0.1`에서 smallest `macro_f1_drop` model은 `{smallest_drop['model']}`이다."
-            )
-        else:
-            interpretation_lines.append(
-                f"- `real_ratio=0.1`에서 highest `test_macro_f1` model은 `{best_macro['model']}`이다."
-            )
-            interpretation_lines.append(
-                "- `macro_f1_drop`는 full-data baseline row가 충분할 때 해석한다."
             )
     else:
         interpretation_lines.append(
-            "- `real_ratio=0.1` 결과가 아직 없으므로 best low-data model 해석은 이후 갱신해야 한다."
+            "- `real_ratio=0.1` 결과가 없으므로 가장 극단적인 low-data 비교는 아직 확정적으로 해석할 수 없다."
         )
 
     interpretation_lines.extend(
         [
             "",
-            "- 이 결과는 augmentation을 적용하지 않은 M4 완료 결과이며, 다음 단계는 M5 `augmentation recovery`이다.",
+            "- 이 해석은 current prototype run에 대한 요약일 뿐이며, final report 결론으로 직접 사용하지 않는다.",
             "",
             "참고 figure:",
             "",
@@ -200,16 +247,16 @@ def _build_low_data_section(rows: list[dict[str, str]]) -> str:
 
 def _build_augmentation_section(rows: list[dict[str, str]]) -> str:
     if not rows:
-        return """## 8. Augmentation Recovery 결과
+        return """## 8. Augmentation Recovery Status
 
-`results/metrics/augmentation_results.csv`가 아직 없으므로 본 섹션은 planned 상태다. 다음 단계에서는 `real_ratio=0.5, 0.25, 0.1`에 대해 `CNN`, `GRU`, `LSTM`, `CNN_GRU`를 대상으로 `train-only augmentation`이 M4 no-augmentation baseline 대비 성능을 얼마나 회복시키는지 비교할 예정이다.
+`results/metrics/augmentation_results.csv`가 아직 없으므로 본 섹션은 pending 상태다. revised workflow에서는 final preprocessing selection 이후 F4 no-augmentation baseline을 확정한 다음, `real_ratio=0.5, 0.25, 0.1`에서 train-only augmentation recovery를 official하게 다시 실행해야 한다.
 """
 
     ordered = _ordered_low_data_rows(rows)
     lines = [
-        "## 8. Augmentation Recovery 결과",
+        "## 8. Augmentation Recovery Status",
         "",
-        "본 섹션은 M5 Augmentation recovery의 완료된 결과를 요약한다. 모든 비교는 `results/metrics/low_data_results.csv`의 no-augmentation baseline 대비 augmentation gain 기준으로 해석한다.",
+        "본 섹션은 현재 저장된 augmentation 결과를 요약하지만, final preprocessing과 official F4 baseline이 확정되기 전이라면 final evidence로 직접 사용하지 않는다.",
         "",
         "| model | real_ratio | no_aug_test_macro_f1 | test_macro_f1 | augmentation_gain_macro_f1 | no_aug_test_accuracy | test_accuracy | augmentation_gain_accuracy |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
@@ -222,23 +269,13 @@ def _build_augmentation_section(rows: list[dict[str, str]]) -> str:
             f"{_format_float(row['test_accuracy'])} | {_format_float(row.get('augmentation_gain_accuracy'))} |"
         )
 
-    interpretation_lines = ["", "현재 augmentation recovery 결과의 예비 해석:"]
+    interpretation_lines = ["", "현재 augmentation 결과의 제한적 관찰:"]
     valid_gain_rows = [
         row for row in rows if row.get("augmentation_gain_macro_f1") not in ("", None)
     ]
     if valid_gain_rows:
         largest_positive = max(valid_gain_rows, key=lambda row: float(row["augmentation_gain_macro_f1"]))
         hurt_rows = [row for row in valid_gain_rows if float(row["augmentation_gain_macro_f1"]) < 0.0]
-        ratio_mean_gains: dict[float, list[float]] = {}
-        for row in valid_gain_rows:
-            ratio = float(row["real_ratio"])
-            ratio_mean_gains.setdefault(ratio, []).append(float(row["augmentation_gain_macro_f1"]))
-        best_ratio = None
-        if ratio_mean_gains:
-            best_ratio = max(
-                ratio_mean_gains.items(),
-                key=lambda item: sum(item[1]) / len(item[1]),
-            )[0]
         interpretation_lines.append(
             f"- largest positive `augmentation_gain_macro_f1`는 `{largest_positive['model']}` at `real_ratio={float(largest_positive['real_ratio']):g}`이다."
         )
@@ -251,17 +288,13 @@ def _build_augmentation_section(rows: list[dict[str, str]]) -> str:
                 )
             )
             interpretation_lines.append(
-                f"- augmentation이 성능을 악화시킨 경우도 있으며, 현재 결과에서는 {hurt_descriptions}를 추가 해석 대상으로 본다."
+                f"- augmentation이 악화된 case도 있으며 현재 결과에서는 {hurt_descriptions}가 추가 해석 대상이다."
             )
         else:
-            interpretation_lines.append("- 현재 결과에서는 `augmentation_gain_macro_f1 < 0`인 뚜렷한 case가 없다.")
-        if best_ratio is not None:
-            interpretation_lines.append(
-                f"- 평균 `augmentation_gain_macro_f1` 기준으로 augmentation은 `real_ratio={best_ratio:g}`에서 가장 유용했다."
-            )
+            interpretation_lines.append("- 현재 저장된 결과에서는 `augmentation_gain_macro_f1 < 0`인 case가 뚜렷하지 않다.")
     else:
         interpretation_lines.append(
-            "- gain column이 아직 계산되지 않았으므로 augmentation 효과 해석은 M5 결과가 저장된 뒤 갱신해야 한다."
+            "- gain column이 아직 없거나 비어 있으므로 augmentation effect는 official rerun 이후 해석해야 한다."
         )
 
     interpretation_lines.extend(
@@ -286,6 +319,9 @@ def build_preliminary_report(project_root: Path | None = None) -> Path:
     preprocessing_rows = _read_csv_rows(
         root / "results" / "metrics" / "preprocessing_ablation_results.csv"
     )
+    final_preprocessing_rows = _read_csv_rows(
+        root / "results" / "metrics" / "final_preprocessing_results.csv"
+    )
     baseline_rows = _read_csv_rows(
         root / "results" / "metrics" / "baseline_results_original_epoch.csv"
     )
@@ -293,33 +329,32 @@ def build_preliminary_report(project_root: Path | None = None) -> Path:
     augmentation_rows = _read_csv_rows(root / "results" / "metrics" / "augmentation_results.csv")
 
     preprocessing_table = _build_preprocessing_table(preprocessing_rows)
+    final_preprocessing_section = _build_final_preprocessing_section(
+        final_preprocessing_rows,
+        decision_exists=(root / "docs" / "final_preprocessing_decision.md").exists(),
+    )
     baseline_table = _build_baseline_table(baseline_rows)
     low_data_section = _build_low_data_section(low_data_rows)
     augmentation_section = _build_augmentation_section(augmentation_rows)
     frame_count_table = build_frame_count_table(low_data_rows)
     duration_estimate_table = build_duration_estimate_table(low_data_rows, fs=100)
-    baseline_device = baseline_rows[0]["device"] if baseline_rows else "device 확인 필요"
+    baseline_device = baseline_rows[0]["device"] if baseline_rows else "unknown"
 
-    report_text = f"""# Wi-Fi CSI 기반 행동 인식에서 Low-data Generalization과 전처리/모델 구조의 영향 분석
+    report_text = f"""# Wi-Fi CSI 기반 HAR Preliminary Report
 
-## 1. 기본 정보
+## 1. 문서 성격
 
-- 제목: Wi-Fi CSI 기반 행동 인식에서 Low-data Generalization과 전처리/모델 구조의 영향 분석
-- 소속:
-- 학번:
-- 이름:
+이 문서는 현재 저장소에 존재하는 실험 결과를 정리한 `preliminary_report`이다. 기존 codebase는 계속 재사용하지만, 현재 저장된 `results/`와 `reports/` 산출물은 revised final project 관점에서 prototype/development output으로 취급한다. 따라서 아래 표와 해석은 구현 검증과 계획 수립에는 유용하지만, final report의 공식 결론으로 직접 사용하지 않는다.
+
+## 2. 문제 정의와 데이터
+
+Wi-Fi CSI 기반 `Human Activity Recognition`은 `environment`, `subject`, `device position`, `room layout`, `noise` 변화에 민감하다. 이 프로젝트는 `UT-HAR`에서 `real_ratio`를 줄였을 때 성능이 얼마나 유지되는지, 그리고 preprocessing, model choice, `train-only augmentation`이 그 일반화 성능에 어떤 영향을 주는지를 분석하려고 한다.
+
 - Dataset: `UT-HAR`
-- Task: `7-class Human Activity Recognition`
-
-## 2. 문제 정의 및 동기
-
-Wi-Fi CSI 기반 `Human Activity Recognition`은 여전히 `generalization failure` 문제를 크게 겪는다. CSI signal은 `environment`, `subject`, `device position`, `room layout`, `noise` 변화에 민감하고, 같은 행동이라도 수집 환경이 달라지면 분포가 쉽게 바뀔 수 있다. 따라서 특정 환경에서 높은 성능이 나왔다고 해도 새로운 환경에서 같은 수준의 성능을 유지하는 것은 어렵다.
-
-또한 새로운 공간이나 배치마다 충분한 `labeled data`를 다시 수집하는 것은 비용이 크다. 그래서 본 프로젝트는 real labeled data가 줄어드는 상황에서 성능 저하를 얼마나 줄일 수 있는지에 초점을 둔다. 구체적으로는 preprocessing, model choice, augmentation이 `low-data generalization`에 어떤 영향을 주는지 분석하려고 한다. 현재 preliminary report에서는 `data check / EDA`, `preprocessing ablation`, `full-data baseline`, `low-data robustness`까지를 정리하고, 이후 `augmentation recovery` 실험을 이어서 수행할 계획이다.
-
-## 3. Dataset 설명
-
-본 프로젝트는 `UT-HAR` dataset을 사용한다. 입력 feature shape은 `X_train=(3977, 250, 90)`, `X_val=(496, 250, 90)`, `X_test=(500, 250, 90)`이며, label은 `0..6` 범위의 `7-class classification` task이다. 파일 확장자는 `.csv`이지만 실제 저장 형식은 NumPy binary이므로 `np.load`로 불러와야 한다.
+- Input shape: `X_train=(3977, 250, 90)`, `X_val=(496, 250, 90)`, `X_test=(500, 250, 90)`
+- Label range: `0..6`
+- One sample: `250 timesteps x 90 CSI features`
+- Benchmark code preserved under `original_baseline/`
 
 참고 figure:
 
@@ -327,114 +362,89 @@ Wi-Fi CSI 기반 `Human Activity Recognition`은 여전히 `generalization failu
 - `results/figures/sample_csi_heatmap.png`
 - `results/figures/sample_csi_lineplot.png`
 
-class distribution은 완전히 균등하지 않다. 따라서 단순 `Accuracy`만 보면 특정 class의 성능 저하를 놓칠 수 있어 `Macro F1`를 주요 metric으로 사용한다. 또한 각 sample이 `time x CSI feature` 구조를 가지므로, heatmap은 전체 행렬 구조를 보여주고 line plot은 일부 feature의 시간축 변화를 보여주는 보완적 시각화가 된다.
+## 3. CSI frame budget 해석
 
-## 4. 입력 window와 CSI frame 수
-
-- one sample은 `250 timesteps x 90 CSI features` 구조를 가진다.
-- `X_train=(3977, 250, 90)`, `X_val=(496, 250, 90)`, `X_test=(500, 250, 90)`이므로 본 processed benchmark에서는 timestep을 `CSI frame index`로 해석한다.
-- `90 CSI features`는 `Intel 5300 NIC` style CSI layout 관점에서 `30 subcarriers x 3 antenna pairs = 90 features`로 해석할 수 있다.
-- 따라서 one training sample에는 `250 CSI frames`가 포함된다.
+본 저장소에서는 sample 수와 함께 `CSI frame count`를 직접 기록한다. `real_ratio`가 줄어들면 selected train sample 수가 줄고, 각 sample이 `250 CSI frames`를 포함하므로 총 labeled training frame budget도 함께 줄어든다.
 
 ### Total CSI frame count by real_ratio
 
 {frame_count_table}
 
-### 100Hz 가정 시 추정 시간
+### 100Hz 가정 시 예시 시간 길이
 
 {duration_estimate_table}
 
-이 시간 환산은 `sampling_rate=100Hz`라는 가정에 기반한 예시이며, 본 processed benchmark의 실제 `sampling_rate`를 확정하는 의미는 아니다. 따라서 본 보고서의 주 분석은 시간 길이가 아니라 `CSI frame count`와 `real_ratio` 기준으로 수행한다.
+위 시간 환산은 `sampling_rate=100Hz` 가정에 기반한 보조 설명일 뿐이며, 본 프로젝트의 주 분석 단위는 시간보다 `CSI frame count`와 `real_ratio`다.
 
-`real_ratio`가 줄어들면 selected training sample 수가 감소하고, 각 sample이 `250 CSI frames`를 포함하므로 total training `CSI frame` budget도 함께 감소한다. 이는 곧 "labeled CSI frame budget이 줄어들 때 model 성능이 얼마나 유지되는가?"라는 low-data generalization 문제의식과 직접 연결된다.
+## 4. Prototype Benchmark Snapshot
 
-## 5. 전처리
+현재 benchmark prototype은 `training_mode=original_epoch`와 `baseline_results_original_epoch.csv`를 기준으로 정리할 수 있다. 이 결과는 useful benchmark prototype이지만, revised final workflow에서는 F1 official benchmark run으로 다시 생성하거나 `final_` prefix output으로 분리할 수 있다.
 
-전처리는 `none`, `train_global_zscore`, `per_sample_zscore` 세 가지를 비교했다.
+- `training_mode=original_epoch`
+- `augmentation=false`
+- `real_ratio=1.0`
+- current preprocessing in the saved prototype run: `per_sample_zscore`
+- device in saved CSV: `{baseline_device}`
 
-- `none/raw`: 입력값을 그대로 사용
-- `train_global_zscore`: `X_train`에서만 mean/std를 구한 뒤 동일한 통계량을 `train/val/test`에 적용
-- `per_sample_zscore`: 각 sample 내부의 `time x feature` 값을 독립적으로 정규화
+{baseline_table}
 
-controlled setting은 다음과 같다.
+이 표는 prototype benchmark ranking snapshot으로는 유용하지만, 이후 preprocessing decision과 low-data/augmentation 결론까지 대신해 주지는 않는다.
+
+## 5. Prototype Preprocessing Snapshot
+
+현재 preprocessing 결과는 제한된 candidate만 비교한 preliminary snapshot이다. saved comparison은 `none`, `train_global_zscore`, `per_sample_zscore`만 포함하며, revised workflow에서 요구하는 `Min-Max Normalization`, `Robust Scaling`, `Savitzky-Golay Smoothing`, `Moving Average Smoothing`, `train_featurewise_zscore`, `per_sample_featurewise_zscore`는 아직 official comparison에 포함되지 않았다.
+
+controlled setting:
 
 - model=`GRU`
 - `real_ratio=0.25`
 - `augmentation=false`
 - `seed=42`
-- `epochs=30`
-- `selected_by=validation Macro F1`
+- selection metric=`validation Macro F1`
 
 {preprocessing_table}
 
-현재 결과에서는 `per_sample_zscore`가 validation과 test `Macro F1` 모두에서 가장 높게 나타났다. 따라서 main experiments의 기본 preprocessing policy로 `per_sample_zscore`를 선택했다. 다만 `per_sample_zscore`는 absolute amplitude information을 일부 제거할 수 있다는 점은 주의해야 한다. 그럼에도 현재 controlled setting에서는 가장 좋은 일반화 성능을 보여 주었기 때문에, 이후 main experiment에서는 이 정책을 유지하는 것이 타당하다.
+현재 저장된 limited candidate 비교에서는 `per_sample_zscore`가 가장 높은 validation `Macro F1`를 보인다. 그러나 이 결과는 어디까지나 limited candidate pool에서의 preliminary observation이다. 따라서 revised workflow에서는 expanded preprocessing comparison을 다시 수행하고, 그 결과가 나오기 전에는 `per_sample_zscore`나 `Savitzky-Golay Smoothing` 중 어느 것도 final best라고 주장하지 않는다.
 
 참고 figure:
 
 - `results/figures/preprocessing_ablation_macro_f1.png`
 - `results/figures/preprocessing_ablation_val_test_macro_f1_zoomed.png`
 
-## 6. 모델 선택
-
-본 프로젝트는 leaderboard-style benchmark가 아니다. 모델을 무작정 많이 늘리는 대신, 해석 가능한 비교를 위해 대표적인 네 가지 구조만 선택했다.
-
-- `CNN`: local time-subcarrier pattern baseline
-- `GRU`: lightweight sequence baseline
-- `LSTM`: representative recurrent sequence baseline
-- `CNN+GRU`: local feature extraction + temporal modeling hybrid
-
-이 네 모델은 `CNN-only`, `RNN-only`, `hybrid` 구조를 모두 포함하면서도 비교 결과를 설명하기 쉽다. `Transformer` 계열은 흥미로운 future work이지만, 현재 단계에서는 low-data robustness와 interpretability가 핵심이므로 main scope에 넣지 않았다.
-
-## 7. Full-data Baseline 실험
-
-현재 full-data baseline 설정은 다음과 같다.
-
-- `training_mode=original_epoch`
-- models=`CNN`, `GRU`, `LSTM`, `CNN_GRU`
-- original baseline epoch mapping: `CNN=200`, `GRU=200`, `LSTM=200`, `CNN_GRU=200`
-- `real_ratio=1.0`
-- `augmentation=false`
-- `preprocessing=per_sample_zscore`
-- `seed=42`
-- `device={baseline_device}`
-
-현재 `results/metrics/baseline_results_original_epoch.csv`에서 읽은 결과는 다음과 같다.
-
-{baseline_table}
-
-참고 figure:
-
-- `results/figures/baseline_original_epoch_val_test_macro_f1_zoomed.png`
-- `results/figures/baseline_original_epoch_test_macro_f1_zoomed.png`
-- `results/figures/baseline_original_epoch_macro_f1_gap.png`
-
-예비 해석으로는 full-data setting에서는 모든 모델이 매우 높은 성능을 보인다. 현재 결과 기준으로는 `CNN`이 `test Macro F1`와 `test Accuracy`에서 가장 강하게 보인다. 다만 validation score는 거의 포화 수준인 반면 test score는 그보다 낮아, validation-test gap을 어떻게 해석할지 보고서에서 반드시 논의해야 한다. 또한 이 결과만으로 최종 결론을 내리기보다, 이후 `real_ratio`를 줄였을 때 어떤 모델이 덜 무너지는지가 더 중요한 질문이다.
-
-현재 `M3 original_epoch` 결과는 benchmark-style baseline으로 해석해야 한다. 이후 `M4 low-data robustness`와 `M5 augmentation recovery`는 `controlled_generalization` policy를 사용해 진행한다. 그 이유는 low-data validation이 흔들릴 수 있기 때문에 너무 단순한 early stopping은 너무 빨리 멈출 수 있고, 반대로 fixed `200 epochs`는 overfitting 위험이 크기 때문이다.
+{final_preprocessing_section}
 
 {low_data_section}
 
 {augmentation_section}
 
-## 9. 현재까지의 해석
+## 9. Revised Final Workflow and Remaining Work
 
-현재까지의 결과는 전처리 선택이 실제로 중요하다는 점을 보여 준다. `per_sample_zscore`는 low-data controlled setting에서 가장 좋은 `Macro F1`를 보였고, 따라서 main experiments의 기본 policy로 정당화된다. 반면 full-data setting은 상대적으로 쉬운 조건이어서 모든 모델이 강한 성능을 보인다. 즉 full-data에서는 모델 차이가 크지 않게 보일 수 있으며, 진짜 핵심 비교는 `real_ratio`가 `0.5`, `0.25`, `0.1`으로 줄어들 때 어떤 모델이 가장 덜 성능이 저하되는가에 있다.
+- Existing results are currently treated as prototype/development outputs.
+- The final report should be based on official revised workflow outputs.
+- Expanded preprocessing comparison infrastructure is implemented, but official F2 results may still be pending.
+- Existing `per_sample_zscore` result is preliminary among limited candidates only.
+- M4 low-data results may need to be rerun after final preprocessing is selected.
+- M5 full augmentation recovery remains pending for the revised workflow.
+- Future result files should preferably use `final_`-prefixed filenames.
 
-## 10. 한계점
+official revised workflow:
 
-- 현재까지는 `UT-HAR` 단일 dataset만 사용했다.
-- full-data baseline은 `200 epochs`를 사용하므로 overfitting 가능성을 함께 논의해야 한다.
-- `augmentation_results.csv`가 없으면 augmentation 효과는 아직 평가하지 않은 상태로 남는다.
-- 현재 결과는 사실상 `single seed`에 기반한다.
-- 시간 길이 해석은 `sampling_rate`가 확정되지 않았으므로 가정 기반 보조 설명으로만 사용한다.
+1. F1 benchmark model comparison with `original_epoch`
+2. F2 expanded preprocessing comparison
+3. F3 final preprocessing selection by validation `Macro F1`
+4. F4 low-data robustness with selected preprocessing
+5. F5 augmentation recovery against F4 no-augmentation baseline
+6. F6 final report from official revised outputs only
 
-## 11. 향후 계획
+## 10. 한계와 주의사항
 
-- `M5 Augmentation recovery`: `train-only augmentation`
-- best model에 대한 `confusion matrix` 분석
-- report 및 presentation refinement
+- 현재 문서는 final report가 아니라 prototype snapshot 정리 문서다.
+- saved preprocessing comparison은 candidate pool이 제한적이다.
+- saved low-data 결과는 current preprocessing choice에 종속되어 있으므로 F3 이후 rerun 필요성이 있다.
+- `augmentation_results.csv`가 없으면 augmentation 결론은 비워 둔다.
+- 현재 결과 대부분은 single dataset, single seed 관점의 development evidence다.
 
-## 12. 실행 명령 정리
+## 11. 참고 명령
 
 ```bash
 python experiments/01_check_data.py

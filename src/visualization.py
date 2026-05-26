@@ -352,6 +352,104 @@ def save_preprocessing_ablation_plot(csv_path, output_path) -> list[Path]:
     return [main_output, grouped_output]
 
 
+def save_final_preprocessing_plots(csv_path, output_dir) -> list[Path]:
+    """Generate official final-workflow preprocessing comparison figures."""
+    frame = pd.read_csv(csv_path)
+    output_root = Path(output_dir)
+    ensure_dir(output_root)
+
+    frame = frame.copy()
+    if "preprocessing_group" in frame.columns:
+        frame["preprocessing_label"] = frame.apply(
+            lambda row: (
+                f"{row['preprocessing_group']}:{row['preprocessing']}"
+                if str(row["preprocessing_group"]) != "single"
+                else str(row["preprocessing"])
+            ),
+            axis=1,
+        )
+    else:
+        frame["preprocessing_label"] = frame["preprocessing"].astype(str)
+
+    frame = frame.sort_values(by=["val_macro_f1", "test_macro_f1"], ascending=[False, False])
+
+    created_files = [
+        output_root / "final_preprocessing_val_macro_f1.png",
+        output_root / "final_preprocessing_val_test_macro_f1.png",
+        output_root / "final_preprocessing_accuracy.png",
+    ]
+
+    plot_metric_bar(
+        frame,
+        x_col="preprocessing_label",
+        y_col="val_macro_f1",
+        output_path=created_files[0],
+        title="Official Final Workflow Preprocessing Comparison (Validation Macro F1)",
+        xlabel="Preprocessing",
+        ylabel="Validation Macro F1",
+        y_zoom=True,
+        value_labels=True,
+        sort_by="val_macro_f1",
+    )
+    plot_grouped_metric_bar(
+        frame,
+        x_col="preprocessing_label",
+        metric_cols=["val_macro_f1", "test_macro_f1"],
+        output_path=created_files[1],
+        title="Official Final Workflow Preprocessing Comparison (Validation vs Test Macro F1)",
+        xlabel="Preprocessing",
+        ylabel="Macro F1",
+        y_zoom=True,
+        value_labels=True,
+    )
+    plot_grouped_metric_bar(
+        frame,
+        x_col="preprocessing_label",
+        metric_cols=["val_accuracy", "test_accuracy"],
+        output_path=created_files[2],
+        title="Official Final Workflow Preprocessing Comparison (Validation vs Test Accuracy)",
+        xlabel="Preprocessing",
+        ylabel="Accuracy",
+        y_zoom=True,
+        value_labels=True,
+    )
+
+    if frame["model"].astype(str).nunique() > 1:
+        by_model_output = output_root / "final_preprocessing_by_model_macro_f1.png"
+        fig, ax = plt.subplots(figsize=(10, 5.5))
+        labels = list(dict.fromkeys(frame["preprocessing_label"].astype(str).tolist()))
+        positions = np.arange(len(labels))
+        for model_name, model_df in frame.groupby("model"):
+            ordered = (
+                model_df.set_index("preprocessing_label")
+                .reindex(labels)
+                .dropna(subset=["val_macro_f1"])
+                .reset_index()
+            )
+            if ordered.empty:
+                continue
+            x_positions = [labels.index(str(label)) for label in ordered["preprocessing_label"]]
+            y_values = ordered["val_macro_f1"].astype(float).to_numpy()
+            ax.plot(x_positions, y_values, marker="o", label=str(model_name))
+
+        ax.set_title("Official Final Workflow Preprocessing Comparison by Model (Validation Macro F1)")
+        ax.set_xlabel("Preprocessing")
+        ax.set_ylabel("Validation Macro F1")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels)
+        _rotate_x_labels_if_needed(ax, labels)
+        zoom_limits = _compute_zoom_limits(frame["val_macro_f1"].astype(float).to_numpy(), y_zoom=True)
+        if zoom_limits is not None:
+            ax.set_ylim(*zoom_limits)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend()
+        fig.savefig(by_model_output, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        created_files.append(by_model_output)
+
+    return created_files
+
+
 def save_low_data_plots(csv_path, output_dir) -> list[Path]:
     """Generate low-data robustness figures for report and presentation use."""
     frame = pd.read_csv(csv_path)

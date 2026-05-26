@@ -89,10 +89,39 @@ This repository reports `CSI frame count` directly as the rigorous quantity. A `
 
 ## Current Project Status
 
-- `Stage 0`, `M2`, `M2.5`, `M3`, and `M4` are complete.
-- `M4 low-data robustness` is complete and its outputs are stored under `results/metrics/low_data_results.csv` and the `results/figures/low_data_*.png` files.
-- `M5 augmentation recovery` is the next planned step.
-- `M5` is not complete yet.
+- The repository already contains working prototype pipelines for data checking / EDA, benchmark-style baselines, preprocessing ablation, low-data robustness, augmentation smoke testing, figure regeneration, and report generation.
+- Existing outputs under `results/` and `reports/` should now be treated as prototype/development results, not final project evidence.
+- The revised final project will reuse this codebase and regenerate official outputs through a clean sequential workflow.
+- The F2 expanded preprocessing comparison infrastructure is implemented, but official F1/F2 full runs are still pending.
+
+## Final Revised Workflow
+
+Final results should be generated from the revised workflow below, not by mixing older prototype files.
+
+1. F1 benchmark full run with `original_epoch`
+2. F2 single preprocessing comparison with the benchmark rank 1 model
+3. F2 combination preprocessing comparison after reviewing single-method results
+4. F3 final preprocessing selection by validation `Macro F1`
+5. F4 low-data robustness with final preprocessing and benchmark top3 by default
+6. F5 augmentation recovery with the same final preprocessing and same top3/top5 model set
+7. F6 final report from official outputs only
+
+This workflow is cumulative:
+
+- F1 uses the original benchmark epoch policy and identifies the benchmark rank 1 model plus benchmark top models.
+- F2 and later stages use `controlled_generalization`.
+- F2 must compare single preprocessing methods before any combination comparison.
+- F3 freezes the final preprocessing policy before official low-data and augmentation experiments.
+- F4 uses benchmark top3 models by default, with benchmark top5 only as an optional extension.
+- F5 compares augmentation against the F4 no-augmentation baseline using the same model set.
+- F6 uses only official final workflow outputs as final evidence.
+
+The next official experiment task is the F1 benchmark full run, followed by F2 single preprocessing comparison with the benchmark rank 1 model.
+
+Warning:
+
+- The existing `per_sample_zscore` result is preliminary because `Min-Max Normalization`, `Robust Scaling`, `Savitzky-Golay Smoothing`, and other candidates have not yet been tested in the revised workflow.
+- Do not mix prototype result files and final result files in the report.
 
 ## Quick Start
 
@@ -166,6 +195,48 @@ Key parameters:
 
 `original_epoch` mode is still available, but only for original benchmark-style comparison with the copied baseline.
 
+## Run Expanded Preprocessing Comparison
+
+F2 should use the benchmark rank 1 model from F1. First run single preprocessing methods. Then run only promising or logically complementary combinations. F2 and later stages use `controlled_generalization`, while F1 benchmark comparison uses `original_epoch`.
+
+Validation `Macro F1` selects preprocessing. Test `Macro F1` is confirmation only. Official F2 outputs use `final_`-prefixed filenames so they do not mix with older prototype files.
+
+Smoke test:
+
+```bash
+python experiments/12_run_expanded_preprocessing_comparison.py --smoke-test --seed 42 --batch-size 64
+```
+
+Official single-method F2 after benchmark rank 1 is known:
+
+```bash
+python experiments/12_run_expanded_preprocessing_comparison.py --models CNN --comparison-mode single --seed 42 --batch-size 64
+```
+
+Official combination F2 after reviewing single-method results:
+
+```bash
+python experiments/12_run_expanded_preprocessing_comparison.py --models CNN --comparison-mode combination --seed 42 --batch-size 64
+```
+
+Optional all-in-one:
+
+```bash
+python experiments/12_run_expanded_preprocessing_comparison.py --models CNN --comparison-mode all --seed 42 --batch-size 64
+```
+
+CUDA OOM fallback:
+
+```bash
+python experiments/12_run_expanded_preprocessing_comparison.py --models CNN --comparison-mode single --seed 42 --batch-size 32
+```
+
+Final preprocessing decision:
+
+```bash
+python experiments/13_select_final_preprocessing.py
+```
+
 ## Run Low-data Robustness
 
 Smoke test:
@@ -219,9 +290,9 @@ Results are saved to `results/metrics/augmentation_results.csv`, and the figures
 - `results/figures/augmentation_gain_macro_f1.png`
 - `results/figures/augmentation_gain_accuracy.png`
 
-## Next: Augmentation Recovery
+## Revised Workflow Note
 
-`M5 augmentation recovery` is planned next. It is not complete yet, and this repository should not claim augmentation results until `augmentation=true` runs, `augmentation_results.csv`, and augmentation comparison figures are generated.
+The old `M4` and `M5` artifacts remain useful for debugging and planning, but they should not be presented as the final project conclusion. The revised final workflow should prefer fresh `final_`-prefixed outputs when those paths are implemented, so prototype and official files stay separated.
 
 ## Regenerate Report Figures
 
