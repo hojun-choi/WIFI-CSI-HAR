@@ -63,6 +63,9 @@ def apply_stability_ranking(
     close_tolerance: float,
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     ranked = frame.copy()
+    for helper_column in ["selection_rank", "within_close_tolerance", "simplicity_rank"]:
+        if helper_column in ranked.columns:
+            ranked = ranked.drop(columns=[helper_column])
     for column in [
         "mean_val_macro_f1",
         "std_val_macro_f1",

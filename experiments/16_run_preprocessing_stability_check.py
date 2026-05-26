@@ -58,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--close-tolerance", type=float, default=0.005)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--summary-only", action="store_true")
     parser.add_argument("--disable-regenerate-figures", action="store_true")
     return parser.parse_args()
 
@@ -131,8 +132,9 @@ def _check_output_paths(
     summary_csv: Path,
     overwrite: bool,
     dry_run: bool,
+    summary_only: bool,
 ) -> None:
-    existing_paths = [path for path in [results_csv, summary_csv] if path.exists()]
+    existing_paths = [summary_csv] if summary_only else [path for path in [results_csv, summary_csv] if path.exists()]
     if not existing_paths or overwrite:
         if overwrite and existing_paths:
             print("Overwrite enabled for existing stability output files:")
@@ -143,8 +145,7 @@ def _check_output_paths(
     message = (
         "Stability output files already exist. "
         "Delete them or rerun with --overwrite:\n"
-        f"- {results_csv}\n"
-        f"- {summary_csv}"
+        + ("\n".join(f"- {path}" for path in existing_paths))
     )
     if dry_run:
         print(f"Output file check: {message}")
@@ -152,8 +153,9 @@ def _check_output_paths(
     raise RuntimeError(message)
 
 
-def _build_summary_frame(rows: list[dict[str, object]], close_tolerance: float) -> pd.DataFrame:
-    frame = pd.DataFrame(rows)
+def _build_summary_frame(frame: pd.DataFrame, close_tolerance: float) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame()
     grouped_rows: list[dict[str, object]] = []
     for (preprocessing, model), group in frame.groupby(["preprocessing", "model"], sort=False):
         ordered_group = group.sort_values(by="seed")
@@ -184,6 +186,26 @@ def _build_summary_frame(rows: list[dict[str, object]], close_tolerance: float) 
     return ranked_frame
 
 
+def _filtered_records(frame: pd.DataFrame, fieldnames: list[str]) -> list[dict[str, object]]:
+    records = frame.to_dict(orient="records")
+    return [{field: row.get(field, "") for field in fieldnames} for row in records]
+
+
+def _load_existing_per_seed_results(results_csv: Path) -> pd.DataFrame:
+    if not results_csv.exists():
+        raise RuntimeError(
+            f"Per-seed stability CSV was not found: {results_csv}. "
+            "Run the full stability check first."
+        )
+    frame = pd.read_csv(results_csv)
+    if frame.empty:
+        raise RuntimeError(
+            f"Per-seed stability CSV is empty: {results_csv}. "
+            "A summary cannot be generated from an empty file."
+        )
+    return frame
+
+
 def main() -> None:
     args = parse_args()
 
@@ -193,6 +215,8 @@ def main() -> None:
         raise ValueError("epochs must be positive.")
     if not args.seeds:
         raise ValueError("At least one seed must be provided.")
+    if args.summary_only and args.dry_run:
+        raise ValueError("--summary-only and --dry-run cannot be used together.")
 
     final_model_to_run, resolved_rank1_model = _resolve_model(args)
     resolved_candidates = _resolve_candidates(args.candidates)
@@ -212,6 +236,7 @@ def main() -> None:
         "batch_size": args.batch_size,
         "close_tolerance": args.close_tolerance,
         "dry_run": args.dry_run,
+        "summary_only": args.summary_only,
         "results_csv_path": str(results_csv),
         "summary_csv_path": str(summary_csv),
         "checkpoint_dir": str(PROJECT_ROOT / "results" / "checkpoints"),
@@ -224,10 +249,47 @@ def main() -> None:
         summary_csv=summary_csv,
         overwrite=args.overwrite,
         dry_run=args.dry_run,
+        summary_only=args.summary_only,
     )
 
     if args.dry_run:
         print("Dry-run mode: exiting before training.")
+        return
+
+    summary_fieldnames = [
+        "preprocessing",
+        "model",
+        "num_seeds",
+        "seeds",
+        "mean_val_macro_f1",
+        "std_val_macro_f1",
+        "mean_test_macro_f1",
+        "std_test_macro_f1",
+        "mean_val_accuracy",
+        "mean_test_accuracy",
+        "mean_val_test_macro_f1_gap",
+        "selected_by",
+        "selection_rank",
+    ]
+
+    if args.summary_only:
+        per_seed_frame = _load_existing_per_seed_results(results_csv)
+        summary_frame = _build_summary_frame(per_seed_frame, close_tolerance=args.close_tolerance)
+        if summary_frame.empty:
+            raise RuntimeError(
+                "Failed to build the preprocessing stability summary from the existing per-seed CSV."
+            )
+        _write_csv(summary_csv, _filtered_records(summary_frame, summary_fieldnames), summary_fieldnames)
+        print(f"Saved aggregate stability summary to: {summary_csv}")
+        if not args.disable_regenerate_figures:
+            try:
+                regenerate_report_figures = _load_regenerate_figures_callable()
+                regenerated_files = regenerate_report_figures(PROJECT_ROOT)
+                print("Automatically regenerated report figures:")
+                for file_path in regenerated_files:
+                    print(f"- {file_path}")
+            except Exception as exc:
+                print(f"Warning: figure regeneration failed after summary-only run: {exc}")
         return
 
     device = get_device()
@@ -338,23 +400,9 @@ def main() -> None:
     _write_csv(results_csv, rows, per_seed_fieldnames)
     print(f"Saved per-seed stability results to: {results_csv}")
 
-    summary_frame = _build_summary_frame(rows, close_tolerance=args.close_tolerance)
-    summary_fieldnames = [
-        "preprocessing",
-        "model",
-        "num_seeds",
-        "seeds",
-        "mean_val_macro_f1",
-        "std_val_macro_f1",
-        "mean_test_macro_f1",
-        "std_test_macro_f1",
-        "mean_val_accuracy",
-        "mean_test_accuracy",
-        "mean_val_test_macro_f1_gap",
-        "selected_by",
-        "selection_rank",
-    ]
-    _write_csv(summary_csv, summary_frame.to_dict(orient="records"), summary_fieldnames)
+    per_seed_frame = pd.DataFrame(rows)
+    summary_frame = _build_summary_frame(per_seed_frame, close_tolerance=args.close_tolerance)
+    _write_csv(summary_csv, _filtered_records(summary_frame, summary_fieldnames), summary_fieldnames)
     print(f"Saved aggregate stability summary to: {summary_csv}")
 
     if not args.disable_regenerate_figures:

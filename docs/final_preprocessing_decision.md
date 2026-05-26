@@ -2,63 +2,52 @@
 
 ## Selection Source
 
-- Decision source: single-seed F2 result fallback
-- Stability summary file was not found, so the current official F2 result files were used.
+- Decision source: multi-seed preprocessing stability check
+- Summary file: `results/metrics/final_preprocessing_stability_summary.csv`
 
 ## Selection Rule
 
-- Primary: validation Macro F1 from the official F2 run
+- Primary: mean validation Macro F1 across seeds
+- Stability tie-break: lower std of validation Macro F1 within close tolerance
 - Close tolerance: 0.0050
-- Simplicity preference applies only when validation scores are very close.
 - Test Macro F1: confirmation only
 
 ## Selected Final Preprocessing
 
-- selected preprocessing: `savgol_smoothing+train_global_zscore`
+- selected preprocessing: `moving_average_smoothing`
 - model: `ResNet18`
-- number of seeds: 1
-- seeds: 42
-- mean_val_macro_f1: 0.9472
-- std_val_macro_f1: -
-- mean_test_macro_f1: 0.8513
-- std_test_macro_f1: -
-- mean_val_test_macro_f1_gap: 0.0959
+- number of seeds: 3
+- seeds: 42, 43, 44
+- mean_val_macro_f1: 0.9227
+- std_val_macro_f1: 0.0174
+- mean_test_macro_f1: 0.9067
+- std_test_macro_f1: 0.0209
+- mean_val_test_macro_f1_gap: 0.0159
 
 ## Best Validation Candidate
 
-- best candidate by raw validation Macro F1: `savgol_smoothing+train_global_zscore`
-- raw best val_macro_f1: 0.9472
+- best candidate by raw mean validation Macro F1: `moving_average_smoothing+minmax_scaling`
+- raw best mean_val_macro_f1: 0.9268
 
 ## Ranked Stability Results
 
-Stability summary has not been created yet. The current fallback ranking is shown below.
-
-| rank | preprocessing | model | val_macro_f1 | test_macro_f1 | val_accuracy | test_accuracy |
-|---:|---|---|---:|---:|---:|---:|
-| 1 | savgol_smoothing+train_global_zscore | ResNet18 | 0.9472 | 0.8513 | 0.9536 | 0.9060 |
-| 2 | moving_average_smoothing+minmax_scaling | ResNet18 | 0.9445 | 0.9008 | 0.9516 | 0.9400 |
-| 3 | train_featurewise_zscore | ResNet18 | 0.9358 | 0.8955 | 0.9516 | 0.9300 |
-| 4 | savgol_smoothing+train_featurewise_zscore | ResNet18 | 0.9287 | 0.8847 | 0.9355 | 0.9180 |
-| 5 | robust_scaling | ResNet18 | 0.9262 | 0.8680 | 0.9415 | 0.9120 |
-| 6 | savgol_smoothing+minmax_scaling | ResNet18 | 0.9262 | 0.8913 | 0.9415 | 0.9220 |
-| 7 | moving_average_smoothing+train_featurewise_zscore | ResNet18 | 0.9227 | 0.8859 | 0.9415 | 0.9280 |
-| 8 | train_global_zscore | ResNet18 | 0.9154 | 0.8689 | 0.9274 | 0.9140 |
-| 9 | savgol_smoothing | ResNet18 | 0.9153 | 0.8739 | 0.9274 | 0.9140 |
-| 10 | moving_average_smoothing | ResNet18 | 0.9150 | 0.8920 | 0.9355 | 0.9260 |
-| 11 | minmax_scaling | ResNet18 | 0.9121 | 0.9083 | 0.9274 | 0.9360 |
-| 12 | none | ResNet18 | 0.9097 | 0.8874 | 0.9254 | 0.9220 |
-| 13 | per_sample_zscore | ResNet18 | 0.9054 | 0.8763 | 0.9133 | 0.9180 |
-| 14 | per_sample_featurewise_zscore | ResNet18 | 0.4546 | 0.3970 | 0.5302 | 0.4920 |
+| rank | preprocessing | mean_val_macro_f1 | std_val_macro_f1 | mean_test_macro_f1 | std_test_macro_f1 | mean_val_test_macro_f1_gap | num_seeds |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | moving_average_smoothing | 0.9227 | 0.0174 | 0.9067 | 0.0209 | 0.0159 | 3 |
+| 2 | moving_average_smoothing+minmax_scaling | 0.9268 | 0.0178 | 0.9118 | 0.0120 | 0.0150 | 3 |
+| 3 | savgol_smoothing+train_global_zscore | 0.9258 | 0.0222 | 0.8990 | 0.0338 | 0.0268 | 3 |
+| 4 | train_featurewise_zscore | 0.9160 | 0.0359 | 0.8799 | 0.0243 | 0.0361 | 3 |
+| 5 | minmax_scaling | 0.9111 | 0.0142 | 0.9003 | 0.0114 | 0.0108 | 3 |
 
 ## Leakage and Implementation Checks
 
 - Train-statistics-based preprocessing was fit only on the selected train split.
 - Fitted train statistics were applied to train/val/test.
 - Deterministic smoothing was applied consistently to train/val/test.
-- Augmentation was disabled in preprocessing comparison.
+- Augmentation was disabled in this stability check.
 
 ## Limitations
 
-- Only one seed is available in this fallback decision.
-- A multi-seed stability check should be preferred when available.
+- Only selected top candidates were checked.
+- Additional candidates or more seeds may change the ranking.
 - Test is not used for selection.
