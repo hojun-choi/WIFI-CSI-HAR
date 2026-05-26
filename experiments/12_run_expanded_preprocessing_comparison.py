@@ -13,12 +13,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.benchmark_selection import resolve_rank1_model
 from src.data.preprocessing import parse_preprocessing_pipeline
 from src.data.uthar_dataset import create_uthar_dataloaders
 from src.models.cnn import CNNClassifier
 from src.models.cnn_gru import CNNGRUClassifier
-from src.models.gru import GRUClassifier
-from src.models.lstm import LSTMClassifier
+from src.models.benchmark_factory import build_benchmark_model, normalize_benchmark_model_name
 from src.train import run_training
 from src.training_policy import CONTROLLED_GENERALIZATION_DEFAULTS
 from src.utils import ensure_dir, get_device, set_seed
@@ -48,6 +48,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model", default=None, help="Single benchmark rank 1 model alias.")
     parser.add_argument("--models", nargs="+", default=["GRU"])
+    parser.add_argument(
+        "--use-benchmark-rank1",
+        action="store_true",
+        help="Load the F1 benchmark rank 1 model from docs/final_benchmark_selection.md or final_benchmark_results.csv.",
+    )
     parser.add_argument("--preprocessings", nargs="+", default=DEFAULT_SINGLE_PREPROCESSINGS)
     parser.add_argument("--combinations", nargs="+", default=DEFAULT_COMBINATIONS)
     parser.add_argument(
@@ -106,20 +111,19 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_model_name(model_name: str) -> str:
-    return "CNN_GRU" if model_name.upper() == "CNN+GRU" else model_name.upper()
+    upper_name = model_name.strip().upper()
+    if upper_name in {"CNN", "CNN_GRU"}:
+        return upper_name
+    return normalize_benchmark_model_name(model_name)
 
 
 def build_model(model_name: str) -> torch.nn.Module:
     normalized = normalize_model_name(model_name)
     if normalized == "CNN":
         return CNNClassifier()
-    if normalized == "GRU":
-        return GRUClassifier()
-    if normalized == "LSTM":
-        return LSTMClassifier()
     if normalized == "CNN_GRU":
         return CNNGRUClassifier()
-    raise ValueError(f"Unsupported model: {model_name}")
+    return build_benchmark_model(normalized)
 
 
 def _load_regenerate_figures_callable():
@@ -193,6 +197,11 @@ def _resolve_smoke_test(args: argparse.Namespace) -> None:
 
 def _resolve_models(args: argparse.Namespace) -> list[str]:
     models = list(args.models)
+    if args.use_benchmark_rank1:
+        benchmark_rank1 = resolve_rank1_model(PROJECT_ROOT)
+        if benchmark_rank1 is None:
+            raise ValueError("Run F1 original benchmark and benchmark selection first.")
+        models.append(benchmark_rank1)
     if args.model:
         models.append(args.model)
     normalized = [normalize_model_name(model_name) for model_name in models]
@@ -250,9 +259,18 @@ def main() -> None:
     args = parse_args()
     _resolve_smoke_test(args)
 
+    if args.smoke_test:
+        args.use_benchmark_rank1 = False
+
+    user_explicitly_set_model = ("--model" in sys.argv) or ("--models" in sys.argv)
     models = _resolve_models(args)
     if not models:
         raise ValueError("At least one model must be provided via --model or --models.")
+    if not args.smoke_test and not args.use_benchmark_rank1 and not user_explicitly_set_model:
+        raise ValueError(
+            "F2 official workflow expects the benchmark rank 1 model. "
+            "Use --use-benchmark-rank1 or pass --model/--models explicitly."
+        )
     if any(ratio <= 0 or ratio > 1.0 for ratio in [args.real_ratio]):
         raise ValueError("real_ratio must be in the range (0, 1].")
     if args.training_mode != "controlled_generalization":
@@ -268,6 +286,7 @@ def main() -> None:
     resolved_config = {
         "experiment": "expanded_preprocessing_comparison",
         "models": models,
+        "use_benchmark_rank1": args.use_benchmark_rank1,
         "comparison_mode": args.comparison_mode,
         "real_ratio": args.real_ratio,
         "preprocessings": args.preprocessings,

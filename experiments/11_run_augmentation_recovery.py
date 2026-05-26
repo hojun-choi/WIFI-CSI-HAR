@@ -14,10 +14,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.benchmark_selection import resolve_top_models
 from src.data.augmentations import DEFAULT_AUGMENTATION_CONFIG, resolve_augmentation_config
 from src.data.uthar_dataset import create_uthar_dataloaders
 from src.models.cnn import CNNClassifier
 from src.models.cnn_gru import CNNGRUClassifier
+from src.models.benchmark_factory import build_benchmark_model, normalize_benchmark_model_name
 from src.models.gru import GRUClassifier
 from src.models.lstm import LSTMClassifier
 from src.train import run_training
@@ -32,6 +34,8 @@ DEFAULT_REAL_RATIOS = [0.5, 0.25, 0.1]
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run UT-HAR augmentation recovery experiments")
     parser.add_argument("--models", nargs="+", default=DEFAULT_MODELS)
+    parser.add_argument("--use-benchmark-top3", action="store_true")
+    parser.add_argument("--use-benchmark-top5", action="store_true")
     parser.add_argument("--real-ratios", nargs="+", type=float, default=DEFAULT_REAL_RATIOS)
     parser.add_argument(
         "--epochs",
@@ -78,7 +82,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_model_name(model_name: str) -> str:
-    return "CNN_GRU" if model_name.upper() == "CNN+GRU" else model_name.upper()
+    upper_name = model_name.strip().upper()
+    if upper_name in {"CNN", "CNN_GRU"}:
+        return upper_name
+    return normalize_benchmark_model_name(model_name)
 
 
 def build_model(model_name: str) -> torch.nn.Module:
@@ -91,7 +98,21 @@ def build_model(model_name: str) -> torch.nn.Module:
         return LSTMClassifier()
     if normalized == "CNN_GRU":
         return CNNGRUClassifier()
-    raise ValueError(f"Unsupported model: {model_name}")
+    return build_benchmark_model(normalized)
+
+
+def _resolve_models(args: argparse.Namespace) -> list[str]:
+    if args.use_benchmark_top3 and args.use_benchmark_top5:
+        raise ValueError("Choose only one of --use-benchmark-top3 or --use-benchmark-top5.")
+
+    if args.use_benchmark_top3 or args.use_benchmark_top5:
+        top_k = 3 if args.use_benchmark_top3 else 5
+        resolved = resolve_top_models(PROJECT_ROOT, top_k=top_k)
+        if not resolved:
+            raise ValueError("final_benchmark_results.csv is missing. Run F1 original benchmark first.")
+        return [normalize_model_name(model_name) for model_name in resolved]
+
+    return [normalize_model_name(model_name) for model_name in args.models]
 
 
 def _load_regenerate_figures_callable():
@@ -205,7 +226,7 @@ def main() -> None:
     args = parse_args()
     _resolve_smoke_test(args)
 
-    normalized_models = [normalize_model_name(model_name) for model_name in args.models]
+    normalized_models = _resolve_models(args)
     if args.epochs <= 0:
         raise ValueError("epochs must be positive.")
     if any(ratio <= 0 or ratio > 1.0 for ratio in args.real_ratios):
@@ -258,7 +279,7 @@ def main() -> None:
                 PROJECT_ROOT
                 / "results"
                 / "checkpoints"
-                / f"augmentation_{checkpoint_suffix}_{model_name.lower()}_{str(real_ratio).replace('.', 'p')}_best.pt"
+                / f"final_augmentation_{checkpoint_suffix}_{model_name.replace('+', '_').lower()}_{str(real_ratio).replace('.', 'p')}_best.pt"
             )
             model = build_model(model_name)
 
@@ -334,16 +355,16 @@ def main() -> None:
 
     rows, gains_attached = _attach_augmentation_gains(
         rows,
-        PROJECT_ROOT / "results" / "metrics" / "low_data_results.csv",
+        PROJECT_ROOT / "results" / "metrics" / "final_low_data_results.csv",
     )
     if gains_attached:
-        print("Attached augmentation gains using results/metrics/low_data_results.csv")
+        print("Attached augmentation gains using results/metrics/final_low_data_results.csv")
 
     metrics_dir = PROJECT_ROOT / "results" / "metrics"
     csv_path = (
-        metrics_dir / "augmentation_smoke_test_results.csv"
+        metrics_dir / "final_augmentation_smoke_test_results.csv"
         if args.smoke_test
-        else metrics_dir / "augmentation_results.csv"
+        else metrics_dir / "final_augmentation_results.csv"
     )
     _write_results_csv(csv_path, rows)
     print(f"Saved augmentation results to: {csv_path}")

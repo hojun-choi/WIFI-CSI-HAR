@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from src.data.uthar_labels import UT_HAR_CLASS_NAMES, UT_HAR_CLASS_ORDER
 from src.utils import ensure_dir
 
 
@@ -38,6 +39,18 @@ def _annotate_bars(ax, bars, values: list[float]) -> None:
             bar.get_x() + bar.get_width() / 2.0,
             bar.get_height(),
             f"{value:.4f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+
+def _annotate_integer_bars(ax, bars, values: list[int]) -> None:
+    for bar, value in zip(bars, values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            bar.get_height(),
+            str(int(value)),
             ha="center",
             va="bottom",
             fontsize=9,
@@ -234,9 +247,108 @@ def save_sample_csi_lineplot(
         )
 
     ax.set_title("UT-HAR Sample CSI Line Plot (train[0])")
-    ax.set_xlabel("Time Step")
-    ax.set_ylabel("CSI Value")
+    ax.set_xlabel("timestep / CSI frame index")
+    ax.set_ylabel("CSI amplitude/value")
     ax.legend()
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return Path(output_path)
+
+
+def save_uthar_class_distribution_by_activity(
+    split_to_counts: dict[str, list[int]],
+    output_path,
+) -> Path:
+    ensure_dir(Path(output_path).parent)
+    activity_labels = [UT_HAR_CLASS_NAMES[class_id] for class_id in UT_HAR_CLASS_ORDER]
+    split_names = [split_name for split_name in ["train", "val", "test"] if split_name in split_to_counts]
+    positions = np.arange(len(activity_labels))
+    width = 0.8 / max(1, len(split_names))
+    fig, ax = plt.subplots(figsize=(11.5, 5.5))
+    color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+
+    for idx, split_name in enumerate(split_names):
+        counts = [int(value) for value in split_to_counts[split_name]]
+        offset = (idx - (len(split_names) - 1) / 2.0) * width
+        color = color_cycle[idx % len(color_cycle)] if color_cycle else None
+        bars = ax.bar(positions + offset, counts, width=width, label=split_name, color=color)
+        _annotate_integer_bars(ax, bars, counts)
+
+    ax.set_title("UT-HAR Class Distribution by Activity and Split")
+    ax.set_xlabel("Activity")
+    ax.set_ylabel("Sample Count")
+    ax.set_xticks(positions)
+    ax.set_xticklabels(activity_labels)
+    plt.setp(ax.get_xticklabels(), rotation=20, ha="right")
+    ax.legend()
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return Path(output_path)
+
+
+def save_split_size_summary(split_sizes: dict[str, int], output_path) -> Path:
+    ensure_dir(Path(output_path).parent)
+    labels = list(split_sizes.keys())
+    values = [int(split_sizes[label]) for label in labels]
+    positions = np.arange(len(labels))
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    bars = ax.bar(positions, values)
+    _annotate_integer_bars(ax, bars, values)
+    ax.set_title("UT-HAR Loaded Split Size Summary")
+    ax.set_xlabel("Split")
+    ax.set_ylabel("Sample Count")
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels)
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return Path(output_path)
+
+
+def save_sample_csi_heatmap(sample: np.ndarray, output_path) -> Path:
+    ensure_dir(Path(output_path).parent)
+    sample_array = np.asarray(sample)
+    if sample_array.ndim != 2:
+        raise ValueError(f"Expected a 2D sample array, got shape {sample_array.shape}")
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    image = ax.imshow(sample_array, aspect="auto", origin="lower", cmap="viridis")
+    ax.set_title("UT-HAR Sample CSI Heatmap (one sample = 250 CSI frames x 90 CSI features)")
+    ax.set_xlabel("CSI feature index")
+    ax.set_ylabel("timestep / CSI frame index")
+    fig.colorbar(image, ax=ax, label="CSI amplitude/value")
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return Path(output_path)
+
+
+def save_sample_heatmap_by_activity(
+    samples_by_class: dict[int, np.ndarray],
+    output_path,
+) -> Path:
+    ensure_dir(Path(output_path).parent)
+    ordered_classes = [class_id for class_id in UT_HAR_CLASS_ORDER if class_id in samples_by_class]
+    if not ordered_classes:
+        raise ValueError("samples_by_class must contain at least one class sample.")
+
+    fig, axes = plt.subplots(2, 4, figsize=(14, 7))
+    axes_flat = axes.flatten()
+    image = None
+
+    for axis in axes_flat:
+        axis.axis("off")
+
+    for axis, class_id in zip(axes_flat, ordered_classes):
+        sample = np.asarray(samples_by_class[class_id])
+        image = axis.imshow(sample, aspect="auto", origin="lower", cmap="viridis")
+        axis.set_title(UT_HAR_CLASS_NAMES[class_id], fontsize=10)
+        axis.set_xlabel("CSI feature index")
+        axis.set_ylabel("timestep / CSI frame index")
+        axis.axis("on")
+
+    if image is not None:
+        fig.colorbar(image, ax=axes_flat.tolist(), shrink=0.8, label="CSI amplitude/value")
+    fig.suptitle("UT-HAR Sample CSI Heatmap by Activity", fontsize=13)
     fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return Path(output_path)
