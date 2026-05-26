@@ -170,6 +170,9 @@ default candidates:
 - `train_featurewise_zscore`
 - `minmax_scaling`
 - `moving_average_smoothing`
+- current final preprocessing after F3: `moving_average_smoothing+minmax_scaling`
+- selected by mean validation `Macro F1` across seeds
+- test `Macro F1` is confirmation only
 
 artifacts:
 

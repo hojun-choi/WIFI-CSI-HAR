@@ -145,6 +145,9 @@ Single-seed F2 can leave close candidates unresolved. Instead of choosing by tes
   - `train_featurewise_zscore`
   - `minmax_scaling`
   - `moving_average_smoothing`
+- Final preprocessing after F3: `moving_average_smoothing+minmax_scaling`
+- It was selected by mean validation `Macro F1` across seeds.
+- Test `Macro F1` is confirmation only.
 
 Dry run:
 
