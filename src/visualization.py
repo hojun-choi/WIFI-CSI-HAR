@@ -562,6 +562,68 @@ def save_final_preprocessing_plots(csv_path, output_dir) -> list[Path]:
     return created_files
 
 
+def save_preprocessing_stability_plots(csv_path, output_dir) -> list[Path]:
+    """Generate multi-seed preprocessing stability figures from the summary CSV."""
+    frame = pd.read_csv(csv_path).copy()
+    output_root = Path(output_dir)
+    ensure_dir(output_root)
+
+    numeric_columns = [
+        "mean_val_macro_f1",
+        "std_val_macro_f1",
+        "mean_test_macro_f1",
+        "std_test_macro_f1",
+    ]
+    for column in numeric_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    frame = frame.sort_values(by=["selection_rank", "mean_val_macro_f1"], ascending=[True, False])
+    labels = frame["preprocessing"].astype(str).tolist()
+    positions = np.arange(len(labels))
+    created_files = [
+        output_root / "final_preprocessing_stability_mean_val_macro_f1.png",
+        output_root / "final_preprocessing_stability_val_test_macro_f1.png",
+    ]
+
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    values = frame["mean_val_macro_f1"].astype(float).to_numpy()
+    errors = frame["std_val_macro_f1"].astype(float).to_numpy()
+    bars = ax.bar(positions, values, yerr=errors, capsize=4)
+    ax.set_title("Preprocessing Stability Check (Mean Validation Macro F1)")
+    ax.set_xlabel("Preprocessing")
+    ax.set_ylabel("Mean Validation Macro F1")
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels)
+    _rotate_x_labels_if_needed(ax, labels)
+    zoom_limits = _compute_zoom_limits(values, y_zoom=True)
+    if zoom_limits is not None:
+        ax.set_ylim(*zoom_limits)
+    for bar, value, error in zip(bars, values, errors):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            bar.get_height(),
+            f"{value:.4f}\n±{error:.4f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+    fig.savefig(created_files[0], dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+    plot_grouped_metric_bar(
+        frame,
+        x_col="preprocessing",
+        metric_cols=["mean_val_macro_f1", "mean_test_macro_f1"],
+        output_path=created_files[1],
+        title="Preprocessing Stability Check (Mean Validation vs Test Macro F1)",
+        xlabel="Preprocessing",
+        ylabel="Macro F1",
+        y_zoom=True,
+        value_labels=True,
+    )
+    return created_files
+
+
 def save_low_data_plots(csv_path, output_dir) -> list[Path]:
     """Generate low-data robustness figures for report and presentation use."""
     frame = pd.read_csv(csv_path)

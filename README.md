@@ -130,6 +130,45 @@ Workflow rules:
 - F2 single preprocessing comparison must be run before combination comparison.
 - `final_` outputs are used so official results do not mix with old prototype files.
 
+## F3 Multi-seed Preprocessing Stability Check
+
+Single-seed F2 can leave close candidates unresolved. Instead of choosing by test performance, the official F3 follow-up runs a multi-seed validation stability check on the strongest candidates and selects preprocessing by mean validation `Macro F1`.
+
+- Primary selection criterion: mean validation `Macro F1` across seeds
+- Stability tie-break: lower validation `Macro F1` standard deviation within close tolerance
+- Test `Macro F1` is confirmation only
+- Default seeds: `42 43 44`
+- Default candidates:
+  - `savgol_smoothing+train_global_zscore`
+  - `moving_average_smoothing+minmax_scaling`
+  - `train_featurewise_zscore`
+  - `minmax_scaling`
+  - `moving_average_smoothing`
+
+Dry run:
+
+```powershell
+python experiments/16_run_preprocessing_stability_check.py --dry-run
+```
+
+Official stability check:
+
+```powershell
+python -u experiments/16_run_preprocessing_stability_check.py --seeds 42 43 44 --batch-size 64 2>&1 | Tee-Object -FilePath logs\final_preprocessing_stability_resnet18.log
+```
+
+OOM fallback:
+
+```powershell
+python -u experiments/16_run_preprocessing_stability_check.py --seeds 42 43 44 --batch-size 32 --overwrite 2>&1 | Tee-Object -FilePath logs\final_preprocessing_stability_resnet18_bs32.log
+```
+
+Regenerate final decision:
+
+```powershell
+python experiments/13_select_final_preprocessing.py
+```
+
 ## Official F1 Benchmark
 
 F1 is the official restart point for the final project. It uses `raw/none` preprocessing only, uses the original benchmark epoch policy, and does not use early stopping. The runner attempts the original UT_HAR_data model set and records unsupported models explicitly if any wrapper/runtime limitation appears.

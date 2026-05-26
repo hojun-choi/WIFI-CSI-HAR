@@ -125,7 +125,7 @@ output:
 
 - F2 single-method 결과를 본 뒤, 유망하거나 논리적으로 상보적인 preprocessing combinations만 추가 비교한다.
 - blind combination search는 수행하지 않는다.
-- 하나의 final preprocessing policy를 고정한다.
+- close candidate가 남으면 multi-seed validation stability check로 하나의 final preprocessing policy를 고정한다.
 
 candidate combinations:
 
@@ -137,11 +137,44 @@ candidate combinations:
 selection rule:
 
 - primary metric = validation `Macro F1`
+- close candidate가 남으면 mean validation `Macro F1` across seeds를 우선한다.
+- close tolerance 안에서는 lower validation `Macro F1` std를 우선한다.
 - test `Macro F1` is confirmation only
 - 점수가 비슷하면 더 단순하고 해석 가능한 preprocessing을 우선한다.
 
 output:
 
+- `docs/final_preprocessing_decision.md`
+
+## F3 Multi-seed Preprocessing Stability Check
+
+F2 single-seed 결과에서 close candidates가 남으면, test performance로 직접 선택하지 않고 F3 multi-seed stability check를 추가로 수행한다.
+
+기본 원칙:
+
+- benchmark rank 1 model 사용
+- `training_mode = controlled_generalization`
+- `real_ratio = 0.25`
+- `augmentation = false`
+- default seeds: `42`, `43`, `44`
+- primary selection criterion: mean validation `Macro F1` across seeds
+- stability tie-break: lower validation `Macro F1` std within close tolerance
+- test `Macro F1` is confirmation only
+
+default candidates:
+
+- `savgol_smoothing+train_global_zscore`
+- `moving_average_smoothing+minmax_scaling`
+- `train_featurewise_zscore`
+- `minmax_scaling`
+- `moving_average_smoothing`
+
+artifacts:
+
+- `results/metrics/final_preprocessing_stability_results.csv`
+- `results/metrics/final_preprocessing_stability_summary.csv`
+- `results/figures/final_preprocessing_stability_mean_val_macro_f1.png`
+- `results/figures/final_preprocessing_stability_val_test_macro_f1.png`
 - `docs/final_preprocessing_decision.md`
 
 ### F4. Low-data Robustness

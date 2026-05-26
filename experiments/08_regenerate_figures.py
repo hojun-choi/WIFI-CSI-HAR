@@ -16,6 +16,7 @@ from src.visualization import (
     save_baseline_original_epoch_plots,
     save_final_preprocessing_plots,
     save_low_data_plots,
+    save_preprocessing_stability_plots,
     save_preprocessing_ablation_plot,
     save_sample_csi_lineplot,
 )
@@ -35,6 +36,9 @@ def regenerate_report_figures(project_root: Path | None = None) -> list[Path]:
     final_preprocessing_csv = root / "results" / "metrics" / "final_preprocessing_results.csv"
     final_preprocessing_combination_csv = (
         root / "results" / "metrics" / "final_preprocessing_combination_results.csv"
+    )
+    final_preprocessing_stability_summary_csv = (
+        root / "results" / "metrics" / "final_preprocessing_stability_summary.csv"
     )
     sample_path = root / "data" / "UT_HAR" / "data" / "X_train.csv"
     figures_dir = root / "results" / "figures"
@@ -102,6 +106,16 @@ def regenerate_report_figures(project_root: Path | None = None) -> list[Path]:
         print(
             "Skipped final preprocessing figures because neither official CSV was found: "
             f"{final_preprocessing_csv}"
+        )
+
+    if final_preprocessing_stability_summary_csv.exists():
+        created_files.extend(
+            save_preprocessing_stability_plots(final_preprocessing_stability_summary_csv, figures_dir)
+        )
+    else:
+        print(
+            "Skipped preprocessing stability figures because the summary CSV was not found: "
+            f"{final_preprocessing_stability_summary_csv}"
         )
 
     if sample_path.exists():
