@@ -11,11 +11,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.preprocessing_selection import apply_single_seed_ranking, apply_stability_ranking
+from src.preprocessing_selection import (
+    DEFAULT_CLOSE_TOLERANCE,
+    DEFAULT_STD_IMPROVEMENT_THRESHOLD,
+    apply_single_seed_ranking,
+    apply_stability_ranking,
+)
 from src.utils import ensure_dir
-
-
-DEFAULT_CLOSE_TOLERANCE = 0.005
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,6 +29,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_CLOSE_TOLERANCE,
         help="Close-tolerance for stability-aware validation selection.",
+    )
+    parser.add_argument(
+        "--std-improvement-threshold",
+        type=float,
+        default=DEFAULT_STD_IMPROVEMENT_THRESHOLD,
+        help="Minimum std_val_macro_f1 improvement required before a lower-mean candidate can override the best mean validation candidate.",
     )
     return parser.parse_args()
 
@@ -57,15 +65,16 @@ def _format_float(value: object) -> str:
 
 def _stability_table(frame: pd.DataFrame) -> str:
     lines = [
-        "| rank | preprocessing | mean_val_macro_f1 | std_val_macro_f1 | mean_test_macro_f1 | std_test_macro_f1 | mean_val_test_macro_f1_gap | num_seeds |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|",
+        "| rank | preprocessing | mean_val_macro_f1 | std_val_macro_f1 | mean_test_macro_f1 | std_test_macro_f1 | mean_val_test_macro_f1_gap | num_seeds | override_applied |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---|",
     ]
     for _, row in frame.iterrows():
         lines.append(
             f"| {int(row['selection_rank'])} | {row['preprocessing']} | "
             f"{_format_float(row['mean_val_macro_f1'])} | {_format_float(row['std_val_macro_f1'])} | "
             f"{_format_float(row['mean_test_macro_f1'])} | {_format_float(row['std_test_macro_f1'])} | "
-            f"{_format_float(row['mean_val_test_macro_f1_gap'])} | {int(row['num_seeds'])} |"
+            f"{_format_float(row['mean_val_test_macro_f1_gap'])} | {int(row['num_seeds'])} | "
+            f"{str(bool(row.get('stability_override_applied', False))).lower()} |"
         )
     return "\n".join(lines)
 
@@ -90,6 +99,7 @@ def _write_stability_decision_doc(
     selected_row: pd.Series,
     raw_best_row: pd.Series,
     close_tolerance: float,
+    std_improvement_threshold: float,
 ) -> None:
     ensure_dir(output_path.parent)
     seeds_text = selected_row["seeds"]
@@ -99,6 +109,7 @@ def _write_stability_decision_doc(
     except Exception:
         seeds_text = str(seeds_text)
 
+    stability_override_applied = bool(selected_row.get("stability_override_applied", False))
     markdown = f"""# Final Preprocessing Decision
 
 ## Selection Source
@@ -108,9 +119,9 @@ def _write_stability_decision_doc(
 
 ## Selection Rule
 
-- Primary: mean validation Macro F1 across seeds
-- Stability tie-break: lower std of validation Macro F1 within close tolerance
+- Primary: highest mean validation Macro F1 across seeds
 - Close tolerance: {close_tolerance:.4f}
+- Stability override: a lower-mean candidate can override only if std_val_macro_f1 improves by at least {std_improvement_threshold:.4f} within the close tolerance
 - Test Macro F1: confirmation only
 
 ## Selected Final Preprocessing
@@ -124,11 +135,13 @@ def _write_stability_decision_doc(
 - mean_test_macro_f1: {_format_float(selected_row['mean_test_macro_f1'])}
 - std_test_macro_f1: {_format_float(selected_row['std_test_macro_f1'])}
 - mean_val_test_macro_f1_gap: {_format_float(selected_row['mean_val_test_macro_f1_gap'])}
+- stability override applied: {"true" if stability_override_applied else "false"}
 
 ## Best Validation Candidate
 
 - best candidate by raw mean validation Macro F1: `{raw_best_row['preprocessing']}`
 - raw best mean_val_macro_f1: {_format_float(raw_best_row['mean_val_macro_f1'])}
+- raw best std_val_macro_f1: {_format_float(raw_best_row['std_val_macro_f1'])}
 
 ## Ranked Stability Results
 
@@ -155,6 +168,7 @@ def _write_single_seed_decision_doc(
     ranked_frame: pd.DataFrame,
     selected_row: pd.Series,
     close_tolerance: float,
+    std_improvement_threshold: float,
 ) -> None:
     ensure_dir(output_path.parent)
     markdown = f"""# Final Preprocessing Decision
@@ -168,7 +182,7 @@ def _write_single_seed_decision_doc(
 
 - Primary: validation Macro F1 from the official F2 run
 - Close tolerance: {close_tolerance:.4f}
-- Simplicity preference applies only when validation scores are very close.
+- Std improvement threshold: {std_improvement_threshold:.4f} is not applied in single-seed fallback mode
 - Test Macro F1: confirmation only
 
 ## Selected Final Preprocessing
@@ -182,6 +196,7 @@ def _write_single_seed_decision_doc(
 - mean_test_macro_f1: {_format_float(selected_row['test_macro_f1'])}
 - std_test_macro_f1: -
 - mean_val_test_macro_f1_gap: {_format_float(float(selected_row['val_macro_f1']) - float(selected_row['test_macro_f1']))}
+- stability override applied: false
 
 ## Best Validation Candidate
 
@@ -219,6 +234,7 @@ def main() -> None:
         ranked_frame, selected_row, raw_best_row = apply_stability_ranking(
             stability_frame,
             close_tolerance=args.close_tolerance,
+            std_improvement_threshold=args.std_improvement_threshold,
         )
         _write_stability_decision_doc(
             output_path=output_path,
@@ -226,6 +242,7 @@ def main() -> None:
             selected_row=selected_row,
             raw_best_row=raw_best_row,
             close_tolerance=args.close_tolerance,
+            std_improvement_threshold=args.std_improvement_threshold,
         )
         print(f"Selected preprocessing from stability summary: {selected_row['preprocessing']}")
         print(f"Saved decision document: {output_path}")
@@ -248,6 +265,7 @@ def main() -> None:
         ranked_frame=ranked_frame,
         selected_row=selected_row,
         close_tolerance=args.close_tolerance,
+        std_improvement_threshold=args.std_improvement_threshold,
     )
     print(f"Selected preprocessing from single-seed fallback: {selected_row['preprocessing']}")
     print(f"Saved decision document: {output_path}")

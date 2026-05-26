@@ -135,7 +135,8 @@ Workflow rules:
 Single-seed F2 can leave close candidates unresolved. Instead of choosing by test performance, the official F3 follow-up runs a multi-seed validation stability check on the strongest candidates and selects preprocessing by mean validation `Macro F1`.
 
 - Primary selection criterion: mean validation `Macro F1` across seeds
-- Stability tie-break: lower validation `Macro F1` standard deviation within close tolerance
+- Stability is only a meaningful tie-break, not a replacement for the best mean validation score
+- A lower-mean candidate can override only if `std_val_macro_f1` improves by at least `0.003` within the close tolerance
 - Test `Macro F1` is confirmation only
 - Default seeds: `42 43 44`
 - Default candidates:

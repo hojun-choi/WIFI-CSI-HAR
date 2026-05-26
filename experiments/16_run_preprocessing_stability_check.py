@@ -19,6 +19,7 @@ from src.data.preprocessing import parse_preprocessing_pipeline
 from src.data.uthar_dataset import create_uthar_dataloaders
 from src.models.benchmark_factory import build_benchmark_model, normalize_benchmark_model_name
 from src.preprocessing_selection import (
+    DEFAULT_STD_IMPROVEMENT_THRESHOLD,
     apply_stability_ranking,
     serialize_seed_list,
 )
@@ -56,6 +57,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", default="data/UT_HAR")
     parser.add_argument("--output-prefix", default="final")
     parser.add_argument("--close-tolerance", type=float, default=0.005)
+    parser.add_argument(
+        "--std-improvement-threshold",
+        type=float,
+        default=DEFAULT_STD_IMPROVEMENT_THRESHOLD,
+    )
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--summary-only", action="store_true")
@@ -153,7 +159,11 @@ def _check_output_paths(
     raise RuntimeError(message)
 
 
-def _build_summary_frame(frame: pd.DataFrame, close_tolerance: float) -> pd.DataFrame:
+def _build_summary_frame(
+    frame: pd.DataFrame,
+    close_tolerance: float,
+    std_improvement_threshold: float,
+) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame()
     grouped_rows: list[dict[str, object]] = []
@@ -178,11 +188,21 @@ def _build_summary_frame(frame: pd.DataFrame, close_tolerance: float) -> pd.Data
                 "mean_val_accuracy": mean_val_accuracy,
                 "mean_test_accuracy": mean_test_accuracy,
                 "mean_val_test_macro_f1_gap": mean_val_macro_f1 - mean_test_macro_f1,
-                "selected_by": "mean_validation_macro_f1_across_seeds",
+                "selected_by": (
+                    "mean_validation_macro_f1_across_seeds;"
+                    f"close_tolerance={close_tolerance:.4f};"
+                    f"std_improvement_threshold={std_improvement_threshold:.4f}"
+                ),
+                "close_tolerance": close_tolerance,
+                "std_improvement_threshold": std_improvement_threshold,
             }
         )
     summary_frame = pd.DataFrame(grouped_rows)
-    ranked_frame, _, _ = apply_stability_ranking(summary_frame, close_tolerance=close_tolerance)
+    ranked_frame, _, _ = apply_stability_ranking(
+        summary_frame,
+        close_tolerance=close_tolerance,
+        std_improvement_threshold=std_improvement_threshold,
+    )
     return ranked_frame
 
 
@@ -235,6 +255,7 @@ def main() -> None:
         "requested_epochs": args.epochs,
         "batch_size": args.batch_size,
         "close_tolerance": args.close_tolerance,
+        "std_improvement_threshold": args.std_improvement_threshold,
         "dry_run": args.dry_run,
         "summary_only": args.summary_only,
         "results_csv_path": str(results_csv),
@@ -269,12 +290,23 @@ def main() -> None:
         "mean_test_accuracy",
         "mean_val_test_macro_f1_gap",
         "selected_by",
+        "close_tolerance",
+        "std_improvement_threshold",
         "selection_rank",
+        "within_close_tolerance",
+        "simplicity_rank",
+        "std_improvement_over_best",
+        "meaningful_std_improvement",
+        "stability_override_applied",
     ]
 
     if args.summary_only:
         per_seed_frame = _load_existing_per_seed_results(results_csv)
-        summary_frame = _build_summary_frame(per_seed_frame, close_tolerance=args.close_tolerance)
+        summary_frame = _build_summary_frame(
+            per_seed_frame,
+            close_tolerance=args.close_tolerance,
+            std_improvement_threshold=args.std_improvement_threshold,
+        )
         if summary_frame.empty:
             raise RuntimeError(
                 "Failed to build the preprocessing stability summary from the existing per-seed CSV."
@@ -401,7 +433,11 @@ def main() -> None:
     print(f"Saved per-seed stability results to: {results_csv}")
 
     per_seed_frame = pd.DataFrame(rows)
-    summary_frame = _build_summary_frame(per_seed_frame, close_tolerance=args.close_tolerance)
+    summary_frame = _build_summary_frame(
+        per_seed_frame,
+        close_tolerance=args.close_tolerance,
+        std_improvement_threshold=args.std_improvement_threshold,
+    )
     _write_csv(summary_csv, _filtered_records(summary_frame, summary_fieldnames), summary_fieldnames)
     print(f"Saved aggregate stability summary to: {summary_csv}")
 
