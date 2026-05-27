@@ -45,6 +45,18 @@ def _annotate_bars(ax, bars, values: list[float]) -> None:
         )
 
 
+def _annotate_line_points(ax, x_values: list[float], y_values: list[float]) -> None:
+    for x_value, y_value in zip(x_values, y_values):
+        ax.text(
+            x_value,
+            y_value,
+            f"{y_value:.4f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+
+
 def _annotate_integer_bars(ax, bars, values: list[int]) -> None:
     for bar, value in zip(bars, values):
         ax.text(
@@ -698,6 +710,409 @@ def save_low_data_plots(csv_path, output_dir) -> list[Path]:
         )
     else:
         created_files = [path for path in created_files if path.name != "low_data_degradation_accuracy.png"]
+
+    return created_files
+
+
+def save_final_low_data_plots(csv_path, output_dir) -> list[Path]:
+    """Generate official final-workflow low-data robustness figures."""
+    frame = pd.read_csv(csv_path).copy()
+    output_root = Path(output_dir)
+    ensure_dir(output_root)
+
+    required_columns = ["model", "real_ratio", "test_macro_f1", "test_accuracy"]
+    missing_columns = [column for column in required_columns if column not in frame.columns]
+    if missing_columns:
+        print(
+            "Warning: could not generate official low-data figures because required columns are missing: "
+            f"{missing_columns}"
+        )
+        return []
+
+    numeric_columns = [
+        "real_ratio",
+        "test_macro_f1",
+        "test_accuracy",
+        "macro_f1_drop",
+        "macro_f1_retention",
+        "accuracy_drop",
+        "accuracy_retention",
+    ]
+    for column in numeric_columns:
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    ordered_ratios = [1.0, 0.5, 0.25, 0.1]
+    ratio_labels = {1.0: "100%", 0.5: "50%", 0.25: "25%", 0.1: "10%"}
+    models_in_order = ["ResNet18", "LeNet", "ResNet101"]
+    present_models = [model for model in models_in_order if model in frame["model"].astype(str).unique()]
+    if not present_models:
+        present_models = sorted(frame["model"].astype(str).unique().tolist())
+
+    created_files: list[Path] = []
+
+    def _plot_line_metric(
+        metric_col: str,
+        output_path: Path,
+        title: str,
+        ylabel: str,
+        *,
+        add_reference_one: bool = False,
+    ) -> None:
+        if metric_col not in frame.columns:
+            print(f"Warning: skipped {output_path.name} because {metric_col} is missing.")
+            return
+        fig, ax = plt.subplots(figsize=(8.5, 5))
+        all_values: list[float] = []
+        for model_name in present_models:
+            model_df = frame[frame["model"].astype(str) == model_name].copy()
+            ratio_to_value = {
+                float(row["real_ratio"]): float(row[metric_col])
+                for _, row in model_df.iterrows()
+                if pd.notna(row.get(metric_col))
+            }
+            x_values = [ratio for ratio in ordered_ratios if ratio in ratio_to_value]
+            if not x_values:
+                continue
+            y_values = [ratio_to_value[ratio] for ratio in x_values]
+            all_values.extend(y_values)
+            ax.plot(x_values, y_values, marker="o", label=model_name)
+            _annotate_line_points(ax, x_values, y_values)
+
+        if add_reference_one:
+            ax.axhline(1.0, color="black", linewidth=1.0, linestyle=":")
+        ax.set_title(title)
+        ax.set_xlabel("Real training data ratio")
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(ordered_ratios)
+        ax.set_xticklabels([ratio_labels[ratio] for ratio in ordered_ratios])
+        zoom_limits = _compute_zoom_limits(np.asarray(all_values, dtype=float), y_zoom=True)
+        if zoom_limits is not None and metric_col in {"test_macro_f1", "test_accuracy", "macro_f1_retention"}:
+            ax.set_ylim(*zoom_limits)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        created_files.append(output_path)
+
+    _plot_line_metric(
+        metric_col="test_macro_f1",
+        output_path=output_root / "final_low_data_macro_f1_by_ratio.png",
+        title="Low-data robustness: Test Macro F1 by train ratio",
+        ylabel="Test Macro F1",
+    )
+    _plot_line_metric(
+        metric_col="test_accuracy",
+        output_path=output_root / "final_low_data_accuracy_by_ratio.png",
+        title="Low-data robustness: Test Accuracy by train ratio",
+        ylabel="Test Accuracy",
+    )
+    _plot_line_metric(
+        metric_col="macro_f1_retention",
+        output_path=output_root / "final_low_data_macro_f1_retention_by_ratio.png",
+        title="Macro F1 retention under reduced training data",
+        ylabel="Macro F1 retention",
+        add_reference_one=True,
+    )
+    _plot_line_metric(
+        metric_col="macro_f1_drop",
+        output_path=output_root / "final_low_data_macro_f1_drop_by_ratio.png",
+        title="Macro F1 drop under reduced training data",
+        ylabel="Macro F1 drop",
+    )
+
+    if "test_macro_f1" in frame.columns:
+        subset = frame[frame["real_ratio"].isin([0.25, 0.1])].copy()
+        if not subset.empty:
+            subset["ratio_label"] = subset["real_ratio"].map(ratio_labels)
+            positions = np.arange(len(present_models))
+            width = 0.35
+            fig, ax = plt.subplots(figsize=(8.5, 5))
+            color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+            for idx, ratio in enumerate([0.25, 0.1]):
+                ratio_df = (
+                    subset[subset["real_ratio"] == ratio]
+                    .set_index("model")
+                    .reindex(present_models)
+                    .reset_index()
+                )
+                values = ratio_df["test_macro_f1"].astype(float).fillna(np.nan).to_numpy()
+                offset = (idx - 0.5) * width
+                color = color_cycle[idx % len(color_cycle)] if color_cycle else None
+                bars = ax.bar(
+                    positions + offset,
+                    values,
+                    width=width,
+                    label=ratio_labels[ratio],
+                    color=color,
+                )
+                for bar, value in zip(bars, values):
+                    if np.isnan(value):
+                        continue
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2.0,
+                        bar.get_height(),
+                        f"{float(value):.4f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=8,
+                    )
+
+            ax.set_title("Low-data robustness summary at 25% and 10%")
+            ax.set_xlabel("Model")
+            ax.set_ylabel("Test Macro F1")
+            ax.set_xticks(positions)
+            ax.set_xticklabels(present_models)
+            ax.legend()
+            fig.savefig(output_root / "final_low_data_25_10_summary.png", dpi=200, bbox_inches="tight")
+            plt.close(fig)
+            created_files.append(output_root / "final_low_data_25_10_summary.png")
+
+    return created_files
+
+
+def save_final_augmentation_plots(csv_path, output_dir) -> list[Path]:
+    """Generate official final-workflow augmentation recovery figures."""
+    frame = pd.read_csv(csv_path).copy()
+    output_root = Path(output_dir)
+    ensure_dir(output_root)
+
+    required_columns = [
+        "model",
+        "real_ratio",
+        "augmentation_gain_macro_f1",
+        "augmentation_gain_accuracy",
+        "test_macro_f1",
+        "test_accuracy",
+    ]
+    missing_columns = [column for column in required_columns if column not in frame.columns]
+    if missing_columns:
+        print(
+            "Warning: could not generate official augmentation figures because required columns are missing: "
+            f"{missing_columns}"
+        )
+        return []
+
+    numeric_columns = [
+        "real_ratio",
+        "augmentation_gain_macro_f1",
+        "augmentation_gain_accuracy",
+        "test_macro_f1",
+        "test_accuracy",
+        "no_aug_test_macro_f1",
+        "no_aug_test_accuracy",
+    ]
+    for column in numeric_columns:
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    ordered_ratios = [0.5, 0.25, 0.1]
+    ratio_labels = {0.5: "50%", 0.25: "25%", 0.1: "10%"}
+    models_in_order = ["ResNet18", "LeNet", "ResNet101"]
+    present_models = [model for model in models_in_order if model in frame["model"].astype(str).unique()]
+    if not present_models:
+        present_models = sorted(frame["model"].astype(str).unique().tolist())
+
+    created_files: list[Path] = []
+
+    def _plot_gain_metric(
+        metric_col: str,
+        output_path: Path,
+        title: str,
+        ylabel: str,
+    ) -> None:
+        if metric_col not in frame.columns:
+            print(f"Warning: skipped {output_path.name} because {metric_col} is missing.")
+            return
+        fig, ax = plt.subplots(figsize=(8.5, 5))
+        all_values: list[float] = []
+        for model_name in present_models:
+            model_df = frame[frame["model"].astype(str) == model_name].copy()
+            ratio_to_value = {
+                float(row["real_ratio"]): float(row[metric_col])
+                for _, row in model_df.iterrows()
+                if pd.notna(row.get(metric_col))
+            }
+            x_values = [ratio for ratio in ordered_ratios if ratio in ratio_to_value]
+            if not x_values:
+                continue
+            y_values = [ratio_to_value[ratio] for ratio in x_values]
+            all_values.extend(y_values)
+            ax.plot(x_values, y_values, marker="o", label=model_name)
+            _annotate_line_points(ax, x_values, y_values)
+
+        ax.axhline(0.0, color="black", linewidth=1.0, linestyle=":")
+        ax.set_title(title)
+        ax.set_xlabel("Real training data ratio")
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(ordered_ratios)
+        ax.set_xticklabels([ratio_labels[ratio] for ratio in ordered_ratios])
+        if all_values:
+            y_min = min(all_values)
+            y_max = max(all_values)
+            padding = max(0.01, (y_max - y_min) * 0.15 if y_max != y_min else 0.01)
+            ax.set_ylim(y_min - padding, y_max + padding)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        created_files.append(output_path)
+
+    _plot_gain_metric(
+        metric_col="augmentation_gain_macro_f1",
+        output_path=output_root / "final_augmentation_gain_macro_f1_by_ratio.png",
+        title="Augmentation recovery: Macro F1 gain by train ratio",
+        ylabel="Augmentation gain (Macro F1)",
+    )
+    _plot_gain_metric(
+        metric_col="augmentation_gain_accuracy",
+        output_path=output_root / "final_augmentation_gain_accuracy_by_ratio.png",
+        title="Augmentation recovery: Accuracy gain by train ratio",
+        ylabel="Augmentation gain (Accuracy)",
+    )
+
+    if "no_aug_test_macro_f1" in frame.columns:
+        fig, ax = plt.subplots(figsize=(9, 5))
+        positions = np.arange(len(ordered_ratios))
+        width = 0.12 if len(present_models) > 2 else 0.18
+        color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+        for idx, model_name in enumerate(present_models):
+            model_df = frame[frame["model"].astype(str) == model_name].copy()
+            ordered = (
+                model_df.set_index("real_ratio")
+                .reindex(ordered_ratios)
+                .reset_index()
+            )
+            aug_values = ordered["test_macro_f1"].astype(float).to_numpy()
+            no_aug_values = ordered["no_aug_test_macro_f1"].astype(float).to_numpy()
+            center = (idx - (len(present_models) - 1) / 2.0) * (2 * width + 0.03)
+            color = color_cycle[idx % len(color_cycle)] if color_cycle else None
+            bars_no_aug = ax.bar(
+                positions + center - width / 2.0,
+                no_aug_values,
+                width=width,
+                label=f"{model_name} no aug",
+                color=color,
+                alpha=0.45,
+            )
+            bars_aug = ax.bar(
+                positions + center + width / 2.0,
+                aug_values,
+                width=width,
+                label=f"{model_name} aug",
+                color=color,
+            )
+            for bars, values in [(bars_no_aug, no_aug_values), (bars_aug, aug_values)]:
+                for bar, value in zip(bars, values):
+                    if np.isnan(value):
+                        continue
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2.0,
+                        bar.get_height(),
+                        f"{float(value):.4f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=7,
+                    )
+
+        ax.set_title("Augmentation recovery: Macro F1 with and without augmentation")
+        ax.set_xlabel("Real training data ratio")
+        ax.set_ylabel("Test Macro F1")
+        ax.set_xticks(positions)
+        ax.set_xticklabels([ratio_labels[ratio] for ratio in ordered_ratios])
+        ax.legend(ncol=2, fontsize=8)
+        fig.savefig(
+            output_root / "final_augmentation_macro_f1_aug_vs_no_aug.png",
+            dpi=200,
+            bbox_inches="tight",
+        )
+        plt.close(fig)
+        created_files.append(output_root / "final_augmentation_macro_f1_aug_vs_no_aug.png")
+    else:
+        print(
+            "Warning: skipped final_augmentation_macro_f1_aug_vs_no_aug.png because "
+            "no_aug_test_macro_f1 is missing."
+        )
+
+    subset = frame[frame["real_ratio"].isin([0.25, 0.1])].copy()
+    if not subset.empty and "augmentation_gain_macro_f1" in subset.columns:
+        subset["ratio_label"] = subset["real_ratio"].map(ratio_labels)
+        positions = np.arange(len(present_models))
+        width = 0.35
+        fig, ax = plt.subplots(figsize=(8.5, 5))
+        color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+        for idx, ratio in enumerate([0.25, 0.1]):
+            ratio_df = (
+                subset[subset["real_ratio"] == ratio]
+                .set_index("model")
+                .reindex(present_models)
+                .reset_index()
+            )
+            values = ratio_df["augmentation_gain_macro_f1"].astype(float).fillna(np.nan).to_numpy()
+            offset = (idx - 0.5) * width
+            color = color_cycle[idx % len(color_cycle)] if color_cycle else None
+            bars = ax.bar(
+                positions + offset,
+                values,
+                width=width,
+                label=ratio_labels[ratio],
+                color=color,
+            )
+            for bar, value in zip(bars, values):
+                if np.isnan(value):
+                    continue
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    bar.get_height(),
+                    f"{float(value):.4f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+
+        ax.axhline(0.0, color="black", linewidth=1.0, linestyle=":")
+        ax.set_title("Augmentation recovery summary at 25% and 10%")
+        ax.set_xlabel("Model")
+        ax.set_ylabel("Augmentation gain (Macro F1)")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(present_models)
+        ax.legend()
+        fig.savefig(output_root / "final_augmentation_25_10_summary.png", dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        created_files.append(output_root / "final_augmentation_25_10_summary.png")
+
+    if "augmentation_gain_macro_f1" in frame.columns:
+        pivot = (
+            frame.pivot_table(
+                index="model",
+                columns="real_ratio",
+                values="augmentation_gain_macro_f1",
+                aggfunc="mean",
+            )
+            .reindex(index=present_models)
+        )
+        ordered_heatmap_cols = [ratio for ratio in ordered_ratios if ratio in pivot.columns]
+        if ordered_heatmap_cols:
+            pivot = pivot[ordered_heatmap_cols]
+            fig, ax = plt.subplots(figsize=(7.5, 3.8))
+            image = ax.imshow(pivot.to_numpy(dtype=float), aspect="auto", cmap="coolwarm")
+            ax.set_title("Augmentation gain heatmap (Macro F1)")
+            ax.set_xlabel("Real training data ratio")
+            ax.set_ylabel("Model")
+            ax.set_xticks(np.arange(len(ordered_heatmap_cols)))
+            ax.set_xticklabels([ratio_labels[ratio] for ratio in ordered_heatmap_cols])
+            ax.set_yticks(np.arange(len(pivot.index)))
+            ax.set_yticklabels(pivot.index.tolist())
+            for row_idx in range(pivot.shape[0]):
+                for col_idx in range(pivot.shape[1]):
+                    value = pivot.iat[row_idx, col_idx]
+                    if np.isnan(value):
+                        continue
+                    ax.text(col_idx, row_idx, f"{float(value):.4f}", ha="center", va="center", fontsize=8)
+            fig.colorbar(image, ax=ax, label="Augmentation gain (Macro F1)")
+            fig.savefig(output_root / "final_augmentation_gain_heatmap.png", dpi=200, bbox_inches="tight")
+            plt.close(fig)
+            created_files.append(output_root / "final_augmentation_gain_heatmap.png")
 
     return created_files
 

@@ -1,6 +1,6 @@
 # Wi-Fi CSI HAR Workflow Status Report
 
-This report reflects only the clean F1-F6 workflow status. Old prototype artifacts are not used as final evidence.
+This report reflects only the clean F1-F5 workflow status. Old prototype artifacts are not used as final evidence.
 
 ## Workflow Rules
 
@@ -10,16 +10,17 @@ This report reflects only the clean F1-F6 workflow status. Old prototype artifac
 - F2 uses the benchmark rank 1 model from F1.
 - F3 selects final preprocessing primarily by mean validation `Macro F1` across seeds.
 - Test `Macro F1` is confirmation only for preprocessing selection.
-- F4/F5 use benchmark top3 by default and benchmark top5 only as an optional extension.
+- F4 uses benchmark top3 models by default.
 - final report should use only official final workflow outputs.
 
 ## Current Official Status
+
 - F1 benchmark completed: yes
 - F2 preprocessing comparison completed: yes
 - F3 multi-seed stability check completed: yes
 - Final preprocessing selected: `moving_average_smoothing+minmax_scaling`
-- F4 low-data robustness: not completed yet.
-- F5 augmentation recovery: not completed yet.
+- F4 low-data robustness: completed
+- F5 augmentation recovery: completed
 
 
 ## Dataset and Labels
@@ -32,8 +33,15 @@ This report reflects only the clean F1-F6 workflow status. Old prototype artifac
 - if `sampling_rate = fs` Hz, one sample duration is `250 / fs` seconds.
 - `100Hz` conversion is illustrative only and not confirmed ground truth.
 
-Dataset figure:
-- `results\figures\class_distribution_by_activity.png` uses activity names instead of numeric-only labels.
+![UT-HAR class distribution by activity](../results/figures/class_distribution_by_activity.png)
+
+![UT-HAR split size summary](../results/figures/split_size_summary.png)
+
+![UT-HAR sample CSI heatmap](../results/figures/sample_csi_heatmap.png)
+
+![UT-HAR sample CSI line plot](../results/figures/sample_csi_lineplot.png)
+
+![UT-HAR sample heatmap by activity](../results/figures/sample_heatmap_by_activity.png)
 
 
 ## F1. Original Benchmark Full Run
@@ -95,6 +103,16 @@ Benchmark selection document:
 
 - These top combination candidates were forwarded into the F3 multi-seed stability check.
 
+![Final preprocessing validation Macro F1](../results/figures/final_preprocessing_val_macro_f1.png)
+
+![Final preprocessing validation and test Macro F1](../results/figures/final_preprocessing_val_test_macro_f1.png)
+
+![Final preprocessing accuracy comparison](../results/figures/final_preprocessing_accuracy.png)
+
+![Preprocessing stability mean validation Macro F1](../results/figures/final_preprocessing_stability_mean_val_macro_f1.png)
+
+![Preprocessing stability validation and test Macro F1](../results/figures/final_preprocessing_stability_val_test_macro_f1.png)
+
 - `docs/final_preprocessing_decision.md` exists.
 
 
@@ -117,7 +135,7 @@ Benchmark selection document:
 
 - final selected preprocessing = `moving_average_smoothing+minmax_scaling`
 - model = `ResNet18`
-- seeds = 42,  43,  44
+- seeds = 42, 43, 44
 - mean_val_macro_f1 = 0.9268
 - std_val_macro_f1 = 0.0178
 - mean_test_macro_f1 = 0.9118
@@ -128,35 +146,86 @@ Benchmark selection document:
 
 ## F4. Low-data Robustness
 
-F4 low-data robustness has not been completed yet.
+| model | real_ratio | test_macro_f1 | test_accuracy | macro_f1_drop | macro_f1_retention | accuracy_drop | accuracy_retention |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| LeNet | 1.0000 | 0.9621 | 0.9740 | 0.0000 | 1.0000 | 0.0000 | 1.0000 |
+| LeNet | 0.5000 | 0.9333 | 0.9540 | 0.0288 | 0.9701 | 0.0200 | 0.9795 |
+| LeNet | 0.2500 | 0.8368 | 0.8840 | 0.1253 | 0.8698 | 0.0900 | 0.9076 |
+| LeNet | 0.1000 | 0.0649 | 0.2940 | 0.8972 | 0.0675 | 0.6800 | 0.3018 |
+| ResNet101 | 1.0000 | 0.9763 | 0.9800 | 0.0000 | 1.0000 | 0.0000 | 1.0000 |
+| ResNet101 | 0.5000 | 0.9395 | 0.9560 | 0.0367 | 0.9624 | 0.0240 | 0.9755 |
+| ResNet101 | 0.2500 | 0.8565 | 0.8980 | 0.1198 | 0.8773 | 0.0820 | 0.9163 |
+| ResNet101 | 0.1000 | 0.7372 | 0.8060 | 0.2391 | 0.7551 | 0.1740 | 0.8224 |
+| ResNet18 | 1.0000 | 0.9629 | 0.9740 | 0.0000 | 1.0000 | 0.0000 | 1.0000 |
+| ResNet18 | 0.5000 | 0.9361 | 0.9600 | 0.0268 | 0.9722 | 0.0140 | 0.9856 |
+| ResNet18 | 0.2500 | 0.9008 | 0.9400 | 0.0621 | 0.9355 | 0.0340 | 0.9651 |
+| ResNet18 | 0.1000 | 0.7543 | 0.8160 | 0.2085 | 0.7834 | 0.1580 | 0.8378 |
+
+### F4 Interpretation
+
+- At 25% training data, the strongest model by test Macro F1 is `ResNet18` (0.9008).
+- At 10% training data, the strongest model by test Macro F1 is `ResNet18` (0.7543).
+- `LeNet` collapses sharply at 10%, with test Macro F1 dropping to 0.0649.
+- At 50% training data, all benchmark top3 models remain relatively stable.
+- At 25%, model differences become clearer.
+- At 10%, the best Macro F1 retention belongs to `ResNet18` (0.7834).
+
+![Low-data robustness test Macro F1 by train ratio](../results/figures/final_low_data_macro_f1_by_ratio.png)
+
+![Low-data robustness test accuracy by train ratio](../results/figures/final_low_data_accuracy_by_ratio.png)
+
+![Macro F1 retention under reduced training data](../results/figures/final_low_data_macro_f1_retention_by_ratio.png)
+
+![Macro F1 drop under reduced training data](../results/figures/final_low_data_macro_f1_drop_by_ratio.png)
+
+![Low-data robustness summary at 25% and 10%](../results/figures/final_low_data_25_10_summary.png)
 
 
 ## F5. Augmentation Recovery
 
-F5 augmentation recovery has not been completed yet.
+| model | real_ratio | no_aug_test_macro_f1 | test_macro_f1 | no_aug_test_accuracy | test_accuracy | augmentation_gain_macro_f1 | augmentation_gain_accuracy |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| LeNet | 0.5000 | 0.9333 | 0.9291 | 0.9540 | 0.9500 | -0.0043 | -0.0040 |
+| LeNet | 0.2500 | 0.8368 | 0.8239 | 0.8840 | 0.8640 | -0.0129 | -0.0200 |
+| LeNet | 0.1000 | 0.0649 | 0.1059 | 0.2940 | 0.2980 | 0.0410 | 0.0040 |
+| ResNet101 | 0.5000 | 0.9395 | 0.8991 | 0.9560 | 0.9240 | -0.0404 | -0.0320 |
+| ResNet101 | 0.2500 | 0.8565 | 0.8150 | 0.8980 | 0.8560 | -0.0415 | -0.0420 |
+| ResNet101 | 0.1000 | 0.7372 | 0.5823 | 0.8060 | 0.6300 | -0.1549 | -0.1760 |
+| ResNet18 | 0.5000 | 0.9361 | 0.9455 | 0.9600 | 0.9600 | 0.0094 | 0.0000 |
+| ResNet18 | 0.2500 | 0.9008 | 0.8199 | 0.9400 | 0.8580 | -0.0809 | -0.0820 |
+| ResNet18 | 0.1000 | 0.7543 | 0.7309 | 0.8160 | 0.7780 | -0.0235 | -0.0380 |
+
+### F5 Interpretation
+
+- F5 evaluates train-only augmentation against the F4 no-augmentation baseline.
+- Positive Macro F1 gain rows: 2; negative rows: 7; zero rows: 0.
+- Largest positive Macro F1 gain: `LeNet` at `real_ratio=0.1` (0.0410).
+- Largest negative Macro F1 gain: `ResNet101` at `real_ratio=0.1` (-0.1549).
+- Overall, the current train-only augmentation policy does not consistently recover low-data performance.
+- Positive gains should be interpreted carefully when the absolute Macro F1 remains low.
+
+![Augmentation recovery Macro F1 gain by train ratio](../results/figures/final_augmentation_gain_macro_f1_by_ratio.png)
+
+![Augmentation recovery accuracy gain by train ratio](../results/figures/final_augmentation_gain_accuracy_by_ratio.png)
+
+![Augmentation versus no-augmentation Macro F1](../results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png)
+
+![Augmentation recovery summary at 25% and 10%](../results/figures/final_augmentation_25_10_summary.png)
+
+![Augmentation gain heatmap](../results/figures/final_augmentation_gain_heatmap.png)
 
 
 ## F6. Final Report
 
-F6 final report should be generated only after F1, F2/F3, F4, and F5 official outputs are available.
+F6 final report can now be generated from the official F1-F5 outputs. Test-set figures and tables above should be reused as final evidence.
 
 ## Next Step
 
-F4 low-data robustness should be run with:
-
-- benchmark top3 models from F1
-- final preprocessing = `moving_average_smoothing+minmax_scaling`
-- training_mode = `controlled_generalization`
+F5 is complete, so the next step is final report regeneration and packaging from the official F1-F5 outputs.
 
 Command:
 
 ```powershell
-python -u experiments/10_run_low_data_robustness.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --seed 42 --batch-size 64 2>&1 | Tee-Object -FilePath logs\final_low_data_top3.log
-```
-
-OOM fallback:
-
-```powershell
-python -u experiments/10_run_low_data_robustness.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --seed 42 --batch-size 32 --overwrite 2>&1 | Tee-Object -FilePath logs\final_low_data_top3_bs32.log
+python experiments/09_build_preliminary_report.py
 ```
 

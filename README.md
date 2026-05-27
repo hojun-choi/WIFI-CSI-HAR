@@ -130,6 +130,27 @@ Workflow rules:
 - F2 single preprocessing comparison must be run before combination comparison.
 - `final_` outputs are used so official results do not mix with old prototype files.
 
+Official F4 low-data outputs:
+
+- result CSV: `results/metrics/final_low_data_results.csv`
+- figures:
+  - `results/figures/final_low_data_macro_f1_by_ratio.png`
+  - `results/figures/final_low_data_accuracy_by_ratio.png`
+  - `results/figures/final_low_data_macro_f1_retention_by_ratio.png`
+  - `results/figures/final_low_data_macro_f1_drop_by_ratio.png`
+- reports automatically embed generated figures when they exist.
+
+Official F5 augmentation outputs:
+
+- result CSV: `results/metrics/final_augmentation_results.csv`
+- figures:
+  - `results/figures/final_augmentation_gain_macro_f1_by_ratio.png`
+  - `results/figures/final_augmentation_gain_accuracy_by_ratio.png`
+  - `results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png`
+  - `results/figures/final_augmentation_25_10_summary.png`
+- augmentation is evaluated against the F4 no-augmentation baseline.
+- reports automatically embed generated F5 figures when they exist.
+
 ## F3 Multi-seed Preprocessing Stability Check
 
 Single-seed F2 can leave close candidates unresolved. Instead of choosing by test performance, the official F3 follow-up runs a multi-seed validation stability check on the strongest candidates and selects preprocessing by mean validation `Macro F1`.

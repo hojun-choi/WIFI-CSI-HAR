@@ -202,6 +202,12 @@ artifacts:
 output:
 
 - `results/metrics/final_low_data_results.csv`
+- `results/figures/final_low_data_macro_f1_by_ratio.png`
+- `results/figures/final_low_data_accuracy_by_ratio.png`
+- `results/figures/final_low_data_macro_f1_retention_by_ratio.png`
+- `results/figures/final_low_data_macro_f1_drop_by_ratio.png`
+
+Report generation automatically embeds generated F4 figures when they exist.
 
 ### F5. Augmentation Recovery
 
@@ -222,6 +228,12 @@ output:
 output:
 
 - `results/metrics/final_augmentation_results.csv`
+- `results/figures/final_augmentation_gain_macro_f1_by_ratio.png`
+- `results/figures/final_augmentation_gain_accuracy_by_ratio.png`
+- `results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png`
+- `results/figures/final_augmentation_25_10_summary.png`
+
+F5 interpretation is always relative to the F4 no-augmentation baseline, and report generation automatically embeds generated F5 figures when they exist.
 
 ### F6. Final Report
 

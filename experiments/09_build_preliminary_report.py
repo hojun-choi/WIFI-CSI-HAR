@@ -36,9 +36,27 @@ def _format_float(value: str | float | None, digits: int = 4) -> str:
     return f"{float(value):.{digits}f}"
 
 
+def _figure_markdown(root: Path, relative_path: str, caption: str) -> str:
+    figure_path = root / relative_path
+    if figure_path.exists():
+        report_relative = Path("..") / Path(relative_path)
+        return f"![{caption}]({report_relative.as_posix()})"
+    return f"Figure not generated yet: {relative_path}"
+
+
+def _figure_gallery(root: Path, figures: list[tuple[str, str]]) -> str:
+    return "\n\n".join(_figure_markdown(root, path, caption) for path, caption in figures)
+
+
 def _dataset_section(root: Path) -> str:
-    figure_path = root / "results" / "figures" / "class_distribution_by_activity.png"
     activity_names = ", ".join(UT_HAR_CLASS_NAMES[class_id] for class_id in UT_HAR_CLASS_ORDER)
+    figures = [
+        ("results/figures/class_distribution_by_activity.png", "UT-HAR class distribution by activity"),
+        ("results/figures/split_size_summary.png", "UT-HAR split size summary"),
+        ("results/figures/sample_csi_heatmap.png", "UT-HAR sample CSI heatmap"),
+        ("results/figures/sample_csi_lineplot.png", "UT-HAR sample CSI line plot"),
+        ("results/figures/sample_heatmap_by_activity.png", "UT-HAR sample heatmap by activity"),
+    ]
     lines = [
         "## Dataset and Labels",
         "",
@@ -49,40 +67,35 @@ def _dataset_section(root: Path) -> str:
         "- timestep is `CSI frame index`, not directly seconds.",
         "- if `sampling_rate = fs` Hz, one sample duration is `250 / fs` seconds.",
         "- `100Hz` conversion is illustrative only and not confirmed ground truth.",
+        "",
+        _figure_gallery(root, figures),
     ]
-    if figure_path.exists():
-        lines.extend(
-            [
-                "",
-                "Dataset figure:",
-                f"- `{figure_path.relative_to(root)}` uses activity names instead of numeric-only labels.",
-            ]
-        )
     return "\n".join(lines) + "\n"
 
 
 def _current_official_status(
     benchmark_exists: bool,
-    f2_single_exists: bool,
-    stability_frame: pd.DataFrame,
+    f2_exists: bool,
+    f3_exists: bool,
+    f4_exists: bool,
+    f5_exists: bool,
     selected_preprocessing: str | None,
 ) -> str:
-    f3_completed = not stability_frame.empty
     lines = [
         "## Current Official Status",
         "",
         f"- F1 benchmark completed: {'yes' if benchmark_exists else 'no'}",
-        f"- F2 preprocessing comparison completed: {'yes' if f2_single_exists else 'no'}",
-        f"- F3 multi-seed stability check completed: {'yes' if f3_completed else 'no'}",
+        f"- F2 preprocessing comparison completed: {'yes' if f2_exists else 'no'}",
+        f"- F3 multi-seed stability check completed: {'yes' if f3_exists else 'no'}",
         (
             f"- Final preprocessing selected: `{selected_preprocessing}`"
             if selected_preprocessing
             else "- Final preprocessing selected: not available yet"
         ),
-        "- F4 low-data robustness: not completed yet." if True else "",
-        "- F5 augmentation recovery: not completed yet." if True else "",
+        f"- F4 low-data robustness: {'completed' if f4_exists else 'not completed yet'}",
+        f"- F5 augmentation recovery: {'completed' if f5_exists else 'not completed yet'}",
     ]
-    return "\n".join(line for line in lines if line) + "\n"
+    return "\n".join(lines) + "\n"
 
 
 def _benchmark_section(root: Path) -> str:
@@ -130,6 +143,17 @@ def _f2_table(frame: pd.DataFrame) -> str:
             f"{_format_float(row['val_accuracy'])} | {_format_float(row['test_accuracy'])} |"
         )
     return "\n".join(lines)
+
+
+def _f2_f3_figure_gallery(root: Path) -> str:
+    figures = [
+        ("results/figures/final_preprocessing_val_macro_f1.png", "Final preprocessing validation Macro F1"),
+        ("results/figures/final_preprocessing_val_test_macro_f1.png", "Final preprocessing validation and test Macro F1"),
+        ("results/figures/final_preprocessing_accuracy.png", "Final preprocessing accuracy comparison"),
+        ("results/figures/final_preprocessing_stability_mean_val_macro_f1.png", "Preprocessing stability mean validation Macro F1"),
+        ("results/figures/final_preprocessing_stability_val_test_macro_f1.png", "Preprocessing stability validation and test Macro F1"),
+    ]
+    return _figure_gallery(root, figures)
 
 
 def _f2_section(root: Path, decision_exists: bool) -> str:
@@ -193,10 +217,16 @@ F2 preprocessing comparison has not been completed yet.
             ]
         )
 
-    lines.append(
-        "- `docs/final_preprocessing_decision.md` exists."
-        if decision_exists
-        else "- `docs/final_preprocessing_decision.md` has not been created yet."
+    lines.extend(
+        [
+            _f2_f3_figure_gallery(root),
+            "",
+            (
+                "- `docs/final_preprocessing_decision.md` exists."
+                if decision_exists
+                else "- `docs/final_preprocessing_decision.md` has not been created yet."
+            ),
+        ]
     )
     return "\n".join(lines) + "\n"
 
@@ -256,12 +286,10 @@ F3 multi-seed preprocessing stability check has not been completed yet.
     selected_summary = ""
     if selected_row is not None:
         seeds_value = str(selected_row["seeds"]).strip("[]")
-        seeds_value = seeds_value.replace(",", ", ")
+        seeds_value = ", ".join(part.strip() for part in seeds_value.split(",") if part.strip())
         selected_summary = "\n".join(
             [
-                "- final selected preprocessing = `moving_average_smoothing+minmax_scaling`"
-                if str(selected_row["preprocessing"]) == "moving_average_smoothing+minmax_scaling"
-                else f"- final selected preprocessing = `{selected_row['preprocessing']}`",
+                f"- final selected preprocessing = `{selected_row['preprocessing']}`",
                 f"- model = `{selected_row['model']}`",
                 f"- seeds = {seeds_value}",
                 f"- mean_val_macro_f1 = {_format_float(selected_row['mean_val_macro_f1'])}",
@@ -294,72 +322,268 @@ F3 multi-seed preprocessing stability check has not been completed yet.
     return "\n".join(line for line in lines if line is not None) + "\n"
 
 
-def _low_data_section(rows: list[dict[str, str]]) -> str:
-    if not rows:
+def _low_data_figure_gallery(root: Path) -> str:
+    figures = [
+        ("results/figures/final_low_data_macro_f1_by_ratio.png", "Low-data robustness test Macro F1 by train ratio"),
+        ("results/figures/final_low_data_accuracy_by_ratio.png", "Low-data robustness test accuracy by train ratio"),
+        ("results/figures/final_low_data_macro_f1_retention_by_ratio.png", "Macro F1 retention under reduced training data"),
+        ("results/figures/final_low_data_macro_f1_drop_by_ratio.png", "Macro F1 drop under reduced training data"),
+        ("results/figures/final_low_data_25_10_summary.png", "Low-data robustness summary at 25% and 10%"),
+    ]
+    return _figure_gallery(root, figures)
+
+
+def _f4_interpretation(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return ""
+    numeric_columns = ["real_ratio", "test_macro_f1", "test_accuracy", "macro_f1_retention"]
+    working = frame.copy()
+    for column in numeric_columns:
+        if column in working.columns:
+            working[column] = pd.to_numeric(working[column], errors="coerce")
+
+    lines = ["### F4 Interpretation", ""]
+    ratio_025 = working[working["real_ratio"] == 0.25].copy()
+    ratio_01 = working[working["real_ratio"] == 0.1].copy()
+
+    if not ratio_025.empty:
+        best_025 = ratio_025.sort_values(by=["test_macro_f1"], ascending=[False]).iloc[0]
+        lines.append(
+            f"- At 25% training data, the strongest model by test Macro F1 is `{best_025['model']}` "
+            f"({_format_float(best_025['test_macro_f1'])})."
+        )
+    if not ratio_01.empty:
+        best_01 = ratio_01.sort_values(by=["test_macro_f1"], ascending=[False]).iloc[0]
+        lines.append(
+            f"- At 10% training data, the strongest model by test Macro F1 is `{best_01['model']}` "
+            f"({_format_float(best_01['test_macro_f1'])})."
+        )
+        min_row = ratio_01.sort_values(by=["test_macro_f1"], ascending=[True]).iloc[0]
+        if float(min_row["test_macro_f1"]) < 0.2:
+            lines.append(
+                f"- `{min_row['model']}` collapses sharply at 10%, with test Macro F1 dropping to "
+                f"{_format_float(min_row['test_macro_f1'])}."
+            )
+
+    ratio_05 = working[working["real_ratio"] == 0.5].copy()
+    if not ratio_05.empty and ratio_05["test_macro_f1"].notna().all():
+        spread_05 = float(ratio_05["test_macro_f1"].max() - ratio_05["test_macro_f1"].min())
+        if spread_05 < 0.03:
+            lines.append("- At 50% training data, all benchmark top3 models remain relatively stable.")
+        else:
+            lines.append("- At 50% training data, model differences are already visible.")
+
+    if not ratio_025.empty and ratio_025["test_macro_f1"].notna().all():
+        spread_025 = float(ratio_025["test_macro_f1"].max() - ratio_025["test_macro_f1"].min())
+        if spread_025 >= 0.03:
+            lines.append("- At 25%, model differences become clearer.")
+
+    if "macro_f1_retention" in working.columns and ratio_01 is not None and not ratio_01.empty:
+        best_retention = ratio_01.sort_values(by=["macro_f1_retention"], ascending=[False]).iloc[0]
+        lines.append(
+            f"- At 10%, the best Macro F1 retention belongs to `{best_retention['model']}` "
+            f"({_format_float(best_retention['macro_f1_retention'])})."
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+def _low_data_section(root: Path) -> str:
+    frame = _read_frame(root / "results" / "metrics" / "final_low_data_results.csv")
+    if frame.empty:
         return """## F4. Low-data Robustness
 
 F4 low-data robustness has not been completed yet.
 """
 
-    ordered = sorted(rows, key=lambda row: (row["model"], float(row["real_ratio"])))
+    numeric_columns = [
+        "real_ratio",
+        "test_macro_f1",
+        "test_accuracy",
+        "macro_f1_drop",
+        "macro_f1_retention",
+        "accuracy_drop",
+        "accuracy_retention",
+    ]
+    for column in numeric_columns:
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    ordered = frame.sort_values(by=["model", "real_ratio"], ascending=[True, False]).reset_index(drop=True)
+
     lines = [
         "## F4. Low-data Robustness",
         "",
         "| model | real_ratio | test_macro_f1 | test_accuracy | macro_f1_drop | macro_f1_retention | accuracy_drop | accuracy_retention |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    for row in ordered:
+    for _, row in ordered.iterrows():
         lines.append(
             f"| {row['model']} | {_format_float(row['real_ratio'])} | {_format_float(row['test_macro_f1'])} | "
             f"{_format_float(row['test_accuracy'])} | {_format_float(row.get('macro_f1_drop'))} | "
             f"{_format_float(row.get('macro_f1_retention'))} | {_format_float(row.get('accuracy_drop'))} | "
             f"{_format_float(row.get('accuracy_retention'))} |"
         )
+
+    lines.extend(
+        [
+            "",
+            _f4_interpretation(ordered),
+            _low_data_figure_gallery(root),
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
-def _augmentation_section(rows: list[dict[str, str]]) -> str:
-    if not rows:
+def _augmentation_figure_gallery(root: Path) -> str:
+    figures = [
+        (
+            "results/figures/final_augmentation_gain_macro_f1_by_ratio.png",
+            "Augmentation recovery Macro F1 gain by train ratio",
+        ),
+        (
+            "results/figures/final_augmentation_gain_accuracy_by_ratio.png",
+            "Augmentation recovery accuracy gain by train ratio",
+        ),
+        (
+            "results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png",
+            "Augmentation versus no-augmentation Macro F1",
+        ),
+        (
+            "results/figures/final_augmentation_25_10_summary.png",
+            "Augmentation recovery summary at 25% and 10%",
+        ),
+        (
+            "results/figures/final_augmentation_gain_heatmap.png",
+            "Augmentation gain heatmap",
+        ),
+    ]
+    return _figure_gallery(root, figures)
+
+
+def _augmentation_interpretation(frame: pd.DataFrame) -> str:
+    if frame.empty or "augmentation_gain_macro_f1" not in frame.columns:
+        return ""
+
+    working = frame.copy()
+    numeric_columns = [
+        "real_ratio",
+        "augmentation_gain_macro_f1",
+        "augmentation_gain_accuracy",
+        "test_macro_f1",
+        "test_accuracy",
+        "no_aug_test_macro_f1",
+        "no_aug_test_accuracy",
+    ]
+    for column in numeric_columns:
+        if column in working.columns:
+            working[column] = pd.to_numeric(working[column], errors="coerce")
+
+    valid_gains = working["augmentation_gain_macro_f1"].dropna()
+    if valid_gains.empty:
+        return ""
+
+    positive_count = int((valid_gains > 0).sum())
+    negative_count = int((valid_gains < 0).sum())
+    zero_count = int((valid_gains == 0).sum())
+    largest_positive = working.sort_values(by=["augmentation_gain_macro_f1"], ascending=[False]).iloc[0]
+    largest_negative = working.sort_values(by=["augmentation_gain_macro_f1"], ascending=[True]).iloc[0]
+
+    lines = [
+        "### F5 Interpretation",
+        "",
+        "- F5 evaluates train-only augmentation against the F4 no-augmentation baseline.",
+        (
+            f"- Positive Macro F1 gain rows: {positive_count}; "
+            f"negative rows: {negative_count}; zero rows: {zero_count}."
+        ),
+        (
+            f"- Largest positive Macro F1 gain: `{largest_positive['model']}` at "
+            f"`real_ratio={float(largest_positive['real_ratio']):g}` "
+            f"({_format_float(largest_positive['augmentation_gain_macro_f1'])})."
+        ),
+        (
+            f"- Largest negative Macro F1 gain: `{largest_negative['model']}` at "
+            f"`real_ratio={float(largest_negative['real_ratio']):g}` "
+            f"({_format_float(largest_negative['augmentation_gain_macro_f1'])})."
+        ),
+    ]
+
+    if positive_count > negative_count:
+        lines.append("- Overall, augmentation improves more model/ratio pairs than it degrades.")
+    elif negative_count > positive_count:
+        lines.append(
+            "- Overall, the current train-only augmentation policy does not consistently recover low-data performance."
+        )
+    else:
+        lines.append("- Overall, augmentation shows mixed effects across model/ratio pairs.")
+
+    if "test_macro_f1" in working.columns and "no_aug_test_macro_f1" in working.columns:
+        low_absolute = working[
+            (working["augmentation_gain_macro_f1"] > 0) & (working["test_macro_f1"] < 0.2)
+        ]
+        if not low_absolute.empty:
+            lines.append(
+                "- Positive gains should be interpreted carefully when the absolute Macro F1 remains low."
+            )
+
+    return "\n".join(lines) + "\n"
+
+
+def _augmentation_section(root: Path) -> str:
+    frame = _read_frame(root / "results" / "metrics" / "final_augmentation_results.csv")
+    if frame.empty:
         return """## F5. Augmentation Recovery
 
 F5 augmentation recovery has not been completed yet.
 """
 
-    ordered = sorted(rows, key=lambda row: (row["model"], float(row["real_ratio"])))
+    numeric_columns = [
+        "real_ratio",
+        "test_macro_f1",
+        "test_accuracy",
+        "no_aug_test_macro_f1",
+        "no_aug_test_accuracy",
+        "augmentation_gain_macro_f1",
+        "augmentation_gain_accuracy",
+    ]
+    for column in numeric_columns:
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    ordered = frame.sort_values(by=["model", "real_ratio"], ascending=[True, False]).reset_index(drop=True)
     lines = [
         "## F5. Augmentation Recovery",
         "",
-        "| model | real_ratio | test_macro_f1 | test_accuracy | augmentation_gain_macro_f1 | augmentation_gain_accuracy |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| model | real_ratio | no_aug_test_macro_f1 | test_macro_f1 | no_aug_test_accuracy | test_accuracy | augmentation_gain_macro_f1 | augmentation_gain_accuracy |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    for row in ordered:
+    for _, row in ordered.iterrows():
         lines.append(
-            f"| {row['model']} | {_format_float(row['real_ratio'])} | {_format_float(row['test_macro_f1'])} | "
-            f"{_format_float(row['test_accuracy'])} | {_format_float(row.get('augmentation_gain_macro_f1'))} | "
+            f"| {row['model']} | {_format_float(row['real_ratio'])} | "
+            f"{_format_float(row.get('no_aug_test_macro_f1'))} | {_format_float(row['test_macro_f1'])} | "
+            f"{_format_float(row.get('no_aug_test_accuracy'))} | {_format_float(row['test_accuracy'])} | "
+            f"{_format_float(row.get('augmentation_gain_macro_f1'))} | "
             f"{_format_float(row.get('augmentation_gain_accuracy'))} |"
         )
+    lines.extend(
+        [
+            "",
+            _augmentation_interpretation(ordered),
+            _augmentation_figure_gallery(root),
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
 def _next_step_section() -> str:
     return """## Next Step
 
-F4 low-data robustness should be run with:
-
-- benchmark top3 models from F1
-- final preprocessing = `moving_average_smoothing+minmax_scaling`
-- training_mode = `controlled_generalization`
+F5 is complete, so the next step is final report regeneration and packaging from the official F1-F5 outputs.
 
 Command:
 
 ```powershell
-python -u experiments/10_run_low_data_robustness.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --seed 42 --batch-size 64 2>&1 | Tee-Object -FilePath logs\\final_low_data_top3.log
-```
-
-OOM fallback:
-
-```powershell
-python -u experiments/10_run_low_data_robustness.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --seed 42 --batch-size 32 --overwrite 2>&1 | Tee-Object -FilePath logs\\final_low_data_top3_bs32.log
+python experiments/09_build_preliminary_report.py
 ```
 """
 
@@ -370,10 +594,11 @@ def build_preliminary_report(project_root: Path | None = None) -> Path:
     ensure_dir(report_path.parent)
 
     benchmark_exists = (root / "results" / "metrics" / "final_benchmark_results.csv").exists()
-    f2_single_exists = (root / "results" / "metrics" / "final_preprocessing_results.csv").exists()
+    f2_exists = (root / "results" / "metrics" / "final_preprocessing_results.csv").exists()
     stability_frame = _read_frame(root / "results" / "metrics" / "final_preprocessing_stability_summary.csv")
-    low_data_rows = _read_csv_rows(root / "results" / "metrics" / "final_low_data_results.csv")
-    augmentation_rows = _read_csv_rows(root / "results" / "metrics" / "final_augmentation_results.csv")
+    low_data_exists = (root / "results" / "metrics" / "final_low_data_results.csv").exists()
+    augmentation_frame = _read_frame(root / "results" / "metrics" / "final_augmentation_results.csv")
+    f5_exists = not augmentation_frame.empty
     decision_exists = (root / "docs" / "final_preprocessing_decision.md").exists()
     benchmark_selection_exists = (root / "docs" / "final_benchmark_selection.md").exists()
     selected_row = _selected_stability_row(stability_frame)
@@ -381,7 +606,7 @@ def build_preliminary_report(project_root: Path | None = None) -> Path:
 
     report_text = f"""# Wi-Fi CSI HAR Workflow Status Report
 
-This report reflects only the clean F1-F6 workflow status. Old prototype artifacts are not used as final evidence.
+This report reflects only the clean F1-F5 workflow status. Old prototype artifacts are not used as final evidence.
 
 ## Workflow Rules
 
@@ -391,10 +616,10 @@ This report reflects only the clean F1-F6 workflow status. Old prototype artifac
 - F2 uses the benchmark rank 1 model from F1.
 - F3 selects final preprocessing primarily by mean validation `Macro F1` across seeds.
 - Test `Macro F1` is confirmation only for preprocessing selection.
-- F4/F5 use benchmark top3 by default and benchmark top5 only as an optional extension.
+- F4 uses benchmark top3 models by default.
 - final report should use only official final workflow outputs.
 
-{_current_official_status(benchmark_exists, f2_single_exists, stability_frame, selected_preprocessing)}
+{_current_official_status(benchmark_exists, f2_exists, not stability_frame.empty, low_data_exists, f5_exists, selected_preprocessing)}
 
 {_dataset_section(root)}
 
@@ -408,13 +633,13 @@ Benchmark selection document:
 
 {_f3_section(root, stability_frame, decision_exists)}
 
-{_low_data_section(low_data_rows)}
+{_low_data_section(root)}
 
-{_augmentation_section(augmentation_rows)}
+{_augmentation_section(root)}
 
 ## F6. Final Report
 
-F6 final report should be generated only after F1, F2/F3, F4, and F5 official outputs are available.
+F6 final report can now be generated from the official F1-F5 outputs. Test-set figures and tables above should be reused as final evidence.
 
 {_next_step_section()}
 """
