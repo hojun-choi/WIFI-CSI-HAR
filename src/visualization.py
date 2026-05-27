@@ -961,13 +961,13 @@ def save_final_augmentation_plots(csv_path, output_dir) -> list[Path]:
     _plot_gain_metric(
         metric_col="augmentation_gain_macro_f1",
         output_path=output_root / "final_augmentation_gain_macro_f1_by_ratio.png",
-        title="Augmentation recovery: Macro F1 gain by train ratio",
+        title="Offline appended augmentation: Macro F1 gain by train ratio",
         ylabel="Augmentation gain (Macro F1)",
     )
     _plot_gain_metric(
         metric_col="augmentation_gain_accuracy",
         output_path=output_root / "final_augmentation_gain_accuracy_by_ratio.png",
-        title="Augmentation recovery: Accuracy gain by train ratio",
+        title="Offline appended augmentation: Accuracy gain by train ratio",
         ylabel="Augmentation gain (Accuracy)",
     )
 
@@ -1015,7 +1015,7 @@ def save_final_augmentation_plots(csv_path, output_dir) -> list[Path]:
                         fontsize=7,
                     )
 
-        ax.set_title("Augmentation recovery: Macro F1 with and without augmentation")
+        ax.set_title("Real data + synthetic augmentation: Macro F1 with and without augmentation")
         ax.set_xlabel("Real training data ratio")
         ax.set_ylabel("Test Macro F1")
         ax.set_xticks(positions)
@@ -1071,7 +1071,7 @@ def save_final_augmentation_plots(csv_path, output_dir) -> list[Path]:
                 )
 
         ax.axhline(0.0, color="black", linewidth=1.0, linestyle=":")
-        ax.set_title("Augmentation recovery summary at 25% and 10%")
+        ax.set_title("Offline appended augmentation summary at 25% and 10%")
         ax.set_xlabel("Model")
         ax.set_ylabel("Augmentation gain (Macro F1)")
         ax.set_xticks(positions)
@@ -1096,7 +1096,7 @@ def save_final_augmentation_plots(csv_path, output_dir) -> list[Path]:
             pivot = pivot[ordered_heatmap_cols]
             fig, ax = plt.subplots(figsize=(7.5, 3.8))
             image = ax.imshow(pivot.to_numpy(dtype=float), aspect="auto", cmap="coolwarm")
-            ax.set_title("Augmentation gain heatmap (Macro F1)")
+            ax.set_title("Offline appended augmentation gain heatmap (Macro F1)")
             ax.set_xlabel("Real training data ratio")
             ax.set_ylabel("Model")
             ax.set_xticks(np.arange(len(ordered_heatmap_cols)))

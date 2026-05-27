@@ -183,36 +183,39 @@ Benchmark selection document:
 
 ## F5. Augmentation Recovery
 
-| model | real_ratio | no_aug_test_macro_f1 | test_macro_f1 | no_aug_test_accuracy | test_accuracy | augmentation_gain_macro_f1 | augmentation_gain_accuracy |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| LeNet | 0.5000 | 0.9333 | 0.9291 | 0.9540 | 0.9500 | -0.0043 | -0.0040 |
-| LeNet | 0.2500 | 0.8368 | 0.8239 | 0.8840 | 0.8640 | -0.0129 | -0.0200 |
-| LeNet | 0.1000 | 0.0649 | 0.1059 | 0.2940 | 0.2980 | 0.0410 | 0.0040 |
-| ResNet101 | 0.5000 | 0.9395 | 0.8991 | 0.9560 | 0.9240 | -0.0404 | -0.0320 |
-| ResNet101 | 0.2500 | 0.8565 | 0.8150 | 0.8980 | 0.8560 | -0.0415 | -0.0420 |
-| ResNet101 | 0.1000 | 0.7372 | 0.5823 | 0.8060 | 0.6300 | -0.1549 | -0.1760 |
-| ResNet18 | 0.5000 | 0.9361 | 0.9455 | 0.9600 | 0.9600 | 0.0094 | 0.0000 |
-| ResNet18 | 0.2500 | 0.9008 | 0.8199 | 0.9400 | 0.8580 | -0.0809 | -0.0820 |
-| ResNet18 | 0.1000 | 0.7543 | 0.7309 | 0.8160 | 0.7780 | -0.0235 | -0.0380 |
+- This official F5 design uses offline appended synthetic samples, not on-the-fly augmentation.
+- Synthetic samples are generated only from the selected real train subset. Validation/test are never augmented.
+
+| model | real_ratio | selected_real_train_size | synthetic_train_size | effective_train_size | augmentation_add_ratio | no_aug_test_macro_f1 | test_macro_f1 | no_aug_test_accuracy | test_accuracy | augmentation_gain_macro_f1 | augmentation_gain_accuracy |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| LeNet | 0.5000 | 1987 | 1987 | 3974 | 1.0000 | 0.9333 | 0.9086 | 0.9540 | 0.9380 | -0.0247 | -0.0160 |
+| LeNet | 0.2500 | 992 | 992 | 1984 | 1.0000 | 0.8368 | 0.8444 | 0.8840 | 0.8840 | 0.0076 | 0.0000 |
+| LeNet | 0.1000 | 395 | 395 | 790 | 1.0000 | 0.0649 | 0.7325 | 0.2940 | 0.7940 | 0.6676 | 0.5000 |
+| ResNet101 | 0.5000 | 1987 | 1987 | 3974 | 1.0000 | 0.9395 | 0.9175 | 0.9560 | 0.9420 | -0.0220 | -0.0140 |
+| ResNet101 | 0.2500 | 992 | 992 | 1984 | 1.0000 | 0.8565 | 0.8772 | 0.8980 | 0.9100 | 0.0207 | 0.0120 |
+| ResNet101 | 0.1000 | 395 | 395 | 790 | 1.0000 | 0.7372 | 0.6868 | 0.8060 | 0.7600 | -0.0504 | -0.0460 |
+| ResNet18 | 0.5000 | 1987 | 1987 | 3974 | 1.0000 | 0.9361 | 0.9398 | 0.9600 | 0.9600 | 0.0037 | 0.0000 |
+| ResNet18 | 0.2500 | 992 | 992 | 1984 | 1.0000 | 0.9008 | 0.8664 | 0.9400 | 0.9040 | -0.0344 | -0.0360 |
+| ResNet18 | 0.1000 | 395 | 395 | 790 | 1.0000 | 0.7543 | 0.7567 | 0.8160 | 0.8180 | 0.0024 | 0.0020 |
 
 ### F5 Interpretation
 
-- F5 evaluates train-only augmentation against the F4 no-augmentation baseline.
-- Positive Macro F1 gain rows: 2; negative rows: 7; zero rows: 0.
-- Largest positive Macro F1 gain: `LeNet` at `real_ratio=0.1` (0.0410).
-- Largest negative Macro F1 gain: `ResNet101` at `real_ratio=0.1` (-0.1549).
-- Overall, the current train-only augmentation policy does not consistently recover low-data performance.
-- Positive gains should be interpreted carefully when the absolute Macro F1 remains low.
+- F5 evaluates offline appended synthetic augmentation against the F4 no-augmentation baseline.
+- Synthetic samples are generated only from the selected train subset. Validation/test are never augmented.
+- Positive Macro F1 gain rows: 5; negative rows: 4; zero rows: 0.
+- Largest positive Macro F1 gain: `LeNet` at `real_ratio=0.1` (0.6676).
+- Largest negative Macro F1 gain: `ResNet101` at `real_ratio=0.1` (-0.0504).
+- Overall, augmentation improves more model/ratio pairs than it degrades.
 
-![Augmentation recovery Macro F1 gain by train ratio](../results/figures/final_augmentation_gain_macro_f1_by_ratio.png)
+![Offline appended augmentation Macro F1 gain by train ratio](../results/figures/final_augmentation_gain_macro_f1_by_ratio.png)
 
-![Augmentation recovery accuracy gain by train ratio](../results/figures/final_augmentation_gain_accuracy_by_ratio.png)
+![Offline appended augmentation accuracy gain by train ratio](../results/figures/final_augmentation_gain_accuracy_by_ratio.png)
 
-![Augmentation versus no-augmentation Macro F1](../results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png)
+![Real data plus synthetic augmentation versus no-augmentation Macro F1](../results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png)
 
-![Augmentation recovery summary at 25% and 10%](../results/figures/final_augmentation_25_10_summary.png)
+![Offline appended augmentation summary at 25% and 10%](../results/figures/final_augmentation_25_10_summary.png)
 
-![Augmentation gain heatmap](../results/figures/final_augmentation_gain_heatmap.png)
+![Offline appended augmentation gain heatmap](../results/figures/final_augmentation_gain_heatmap.png)
 
 
 ## F6. Final Report

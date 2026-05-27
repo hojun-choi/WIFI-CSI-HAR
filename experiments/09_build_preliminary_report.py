@@ -438,23 +438,23 @@ def _augmentation_figure_gallery(root: Path) -> str:
     figures = [
         (
             "results/figures/final_augmentation_gain_macro_f1_by_ratio.png",
-            "Augmentation recovery Macro F1 gain by train ratio",
+            "Offline appended augmentation Macro F1 gain by train ratio",
         ),
         (
             "results/figures/final_augmentation_gain_accuracy_by_ratio.png",
-            "Augmentation recovery accuracy gain by train ratio",
+            "Offline appended augmentation accuracy gain by train ratio",
         ),
         (
             "results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png",
-            "Augmentation versus no-augmentation Macro F1",
+            "Real data plus synthetic augmentation versus no-augmentation Macro F1",
         ),
         (
             "results/figures/final_augmentation_25_10_summary.png",
-            "Augmentation recovery summary at 25% and 10%",
+            "Offline appended augmentation summary at 25% and 10%",
         ),
         (
             "results/figures/final_augmentation_gain_heatmap.png",
-            "Augmentation gain heatmap",
+            "Offline appended augmentation gain heatmap",
         ),
     ]
     return _figure_gallery(root, figures)
@@ -491,7 +491,8 @@ def _augmentation_interpretation(frame: pd.DataFrame) -> str:
     lines = [
         "### F5 Interpretation",
         "",
-        "- F5 evaluates train-only augmentation against the F4 no-augmentation baseline.",
+        "- F5 evaluates offline appended synthetic augmentation against the F4 no-augmentation baseline.",
+        "- Synthetic samples are generated only from the selected train subset. Validation/test are never augmented.",
         (
             f"- Positive Macro F1 gain rows: {positive_count}; "
             f"negative rows: {negative_count}; zero rows: {zero_count}."
@@ -534,7 +535,7 @@ def _augmentation_section(root: Path) -> str:
     if frame.empty:
         return """## F5. Augmentation Recovery
 
-F5 augmentation recovery has not been completed yet.
+F5 augmentation recovery has not been completed yet under the current offline appended synthetic-data design.
 """
 
     numeric_columns = [
@@ -554,12 +555,19 @@ F5 augmentation recovery has not been completed yet.
     lines = [
         "## F5. Augmentation Recovery",
         "",
-        "| model | real_ratio | no_aug_test_macro_f1 | test_macro_f1 | no_aug_test_accuracy | test_accuracy | augmentation_gain_macro_f1 | augmentation_gain_accuracy |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "- This official F5 design uses offline appended synthetic samples, not on-the-fly augmentation.",
+        "- Synthetic samples are generated only from the selected real train subset. Validation/test are never augmented.",
+        "",
+        "| model | real_ratio | selected_real_train_size | synthetic_train_size | effective_train_size | augmentation_add_ratio | no_aug_test_macro_f1 | test_macro_f1 | no_aug_test_accuracy | test_accuracy | augmentation_gain_macro_f1 | augmentation_gain_accuracy |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for _, row in ordered.iterrows():
         lines.append(
             f"| {row['model']} | {_format_float(row['real_ratio'])} | "
+            f"{_format_float(row.get('selected_real_train_size'), digits=0)} | "
+            f"{_format_float(row.get('synthetic_train_size'), digits=0)} | "
+            f"{_format_float(row.get('effective_train_size'), digits=0)} | "
+            f"{_format_float(row.get('augmentation_add_ratio'))} | "
             f"{_format_float(row.get('no_aug_test_macro_f1'))} | {_format_float(row['test_macro_f1'])} | "
             f"{_format_float(row.get('no_aug_test_accuracy'))} | {_format_float(row['test_accuracy'])} | "
             f"{_format_float(row.get('augmentation_gain_macro_f1'))} | "
@@ -575,8 +583,9 @@ F5 augmentation recovery has not been completed yet.
     return "\n".join(lines) + "\n"
 
 
-def _next_step_section() -> str:
-    return """## Next Step
+def _next_step_section(f5_exists: bool) -> str:
+    if f5_exists:
+        return """## Next Step
 
 F5 is complete, so the next step is final report regeneration and packaging from the official F1-F5 outputs.
 
@@ -584,6 +593,23 @@ Command:
 
 ```powershell
 python experiments/09_build_preliminary_report.py
+```
+"""
+
+    return """## Next Step
+
+F5 should be rerun with the official offline appended synthetic-data design.
+
+Command:
+
+```powershell
+python -u experiments/11_run_augmentation_recovery.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --augmentation-add-ratio 1.0 --seed 42 --batch-size 64 2>&1 | Tee-Object -FilePath logs\\final_augmentation_top3.log
+```
+
+OOM fallback:
+
+```powershell
+python -u experiments/11_run_augmentation_recovery.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --augmentation-add-ratio 1.0 --seed 42 --batch-size 32 --overwrite 2>&1 | Tee-Object -FilePath logs\\final_augmentation_top3_bs32.log
 ```
 """
 
@@ -641,7 +667,7 @@ Benchmark selection document:
 
 F6 final report can now be generated from the official F1-F5 outputs. Test-set figures and tables above should be reused as final evidence.
 
-{_next_step_section()}
+{_next_step_section(f5_exists)}
 """
 
     report_path.write_text(report_text, encoding="utf-8")

@@ -14,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from src.data.sampling import stratified_indices
+
 
 DEFAULT_AUGMENTATION_CONFIG: dict[str, Any] = {
     "gaussian_noise_std": 0.02,
@@ -107,3 +109,68 @@ class UTHARAugmenter:
                 augmented = augmented + noise
 
         return augmented.astype(np.float32, copy=False)
+
+
+def make_augmented_training_set(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    augmentation_add_ratio: float,
+    seed: int,
+    augmentation_config: dict[str, Any] | None = None,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Create offline appended synthetic training samples from the selected train subset."""
+    X_real = np.asarray(X_train, dtype=np.float32)
+    y_real = np.asarray(y_train, dtype=np.int64)
+
+    if augmentation_add_ratio < 0:
+        raise ValueError("augmentation_add_ratio must be non-negative.")
+
+    resolved_config = resolve_augmentation_config(augmentation_config)
+    metadata = {
+        "augmentation_mode": "offline_append",
+        "real_train_size": int(len(y_real)),
+        "synthetic_train_size": 0,
+        "effective_train_size": int(len(y_real)),
+        "augmentation_add_ratio": float(augmentation_add_ratio),
+        "augmentation_config": resolved_config,
+        "synthetic_generation_seed": int(seed),
+    }
+
+    if augmentation_add_ratio == 0.0 or len(y_real) == 0:
+        return X_real, y_real, metadata
+
+    augmenter = UTHARAugmenter(resolved_config)
+    rng = np.random.default_rng(seed)
+    synthetic_X_chunks: list[np.ndarray] = []
+    synthetic_y_chunks: list[np.ndarray] = []
+
+    full_copies = int(np.floor(augmentation_add_ratio))
+    remainder_ratio = float(augmentation_add_ratio - full_copies)
+
+    def _augment_subset(subset_X: np.ndarray, subset_y: np.ndarray) -> None:
+        if len(subset_y) == 0:
+            return
+        augmented_samples = [
+            augmenter(np.asarray(sample, dtype=np.float32), rng) for sample in subset_X
+        ]
+        synthetic_X_chunks.append(np.asarray(augmented_samples, dtype=np.float32))
+        synthetic_y_chunks.append(np.asarray(subset_y, dtype=np.int64))
+
+    for _ in range(full_copies):
+        _augment_subset(X_real, y_real)
+
+    if remainder_ratio > 0:
+        selected_indices = stratified_indices(y_real, ratio=remainder_ratio, seed=seed + full_copies + 1)
+        _augment_subset(X_real[selected_indices], y_real[selected_indices])
+
+    if not synthetic_X_chunks:
+        return X_real, y_real, metadata
+
+    X_synthetic = np.concatenate(synthetic_X_chunks, axis=0).astype(np.float32, copy=False)
+    y_synthetic = np.concatenate(synthetic_y_chunks, axis=0).astype(np.int64, copy=False)
+    X_effective = np.concatenate([X_real, X_synthetic], axis=0).astype(np.float32, copy=False)
+    y_effective = np.concatenate([y_real, y_synthetic], axis=0).astype(np.int64, copy=False)
+
+    metadata["synthetic_train_size"] = int(len(y_synthetic))
+    metadata["effective_train_size"] = int(len(y_effective))
+    return X_effective, y_effective, metadata

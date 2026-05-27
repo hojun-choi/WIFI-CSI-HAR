@@ -148,7 +148,9 @@ Official F5 augmentation outputs:
   - `results/figures/final_augmentation_gain_accuracy_by_ratio.png`
   - `results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png`
   - `results/figures/final_augmentation_25_10_summary.png`
-- augmentation is evaluated against the F4 no-augmentation baseline.
+- augmentation is evaluated against the F4 no-augmentation baseline at the same `real_ratio`.
+- official F5 uses `augmentation_mode=offline_append`, not on-the-fly augmentation.
+- `augmentation_add_ratio=1.0` means one synthetic sample is appended for each selected real train sample.
 - reports automatically embed generated F5 figures when they exist.
 
 ## F3 Multi-seed Preprocessing Stability Check

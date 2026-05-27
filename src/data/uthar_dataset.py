@@ -1,7 +1,7 @@
 """UT-HAR dataset utilities for the clean project-specific pipeline."""
 
 # Rubric: this module owns dataset loading, tensor conversion, train-based
-# normalization, and train-only augmentation so preprocessing stays auditable.
+# normalization, and train-only augmentation paths so preprocessing stays auditable.
 
 from __future__ import annotations
 
@@ -13,13 +13,17 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from src.data.augmentations import UTHARAugmenter, resolve_augmentation_config
+from src.data.augmentations import (
+    UTHARAugmenter,
+    make_augmented_training_set,
+    resolve_augmentation_config,
+)
 from src.data.preprocessing import apply_preprocessing
 from src.data.sampling import stratified_indices
 
 
 class UTHARDataset(Dataset):
-    """Array-backed dataset with optional train-only on-the-fly augmentation."""
+    """Array-backed dataset with optional legacy train-only on-the-fly augmentation."""
 
     def __init__(
         self,
@@ -72,14 +76,16 @@ def make_tensor_datasets(
     y_val: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
-    augmentation: bool = False,
+    augmentation_mode: str = "none",
     augmentation_config: dict[str, Any] | None = None,
     seed: int = 42,
 ) -> tuple[Dataset, Dataset, Dataset]:
     """Convert UT-HAR arrays to Dataset objects."""
     augmenter = None
-    if augmentation:
+    if augmentation_mode == "on_the_fly":
         augmenter = UTHARAugmenter(augmentation_config)
+    elif augmentation_mode not in {"none", "offline_append"}:
+        raise ValueError(f"Unsupported augmentation_mode for dataset construction: {augmentation_mode}")
 
     train_dataset = UTHARDataset(X_train, y_train, augmenter=augmenter, seed=seed)
     # Rubric: validation/test are always built from non-augmented arrays.
@@ -109,6 +115,8 @@ def create_uthar_dataloaders(
     seed: int,
     model_type: str = "GRU",
     augmentation: bool = False,
+    augmentation_mode: str = "none",
+    augmentation_add_ratio: float = 0.0,
     augmentation_config: dict[str, Any] | None = None,
     preprocessing_config: dict[str, Any] | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader, dict[str, object]]:
@@ -137,18 +145,60 @@ def create_uthar_dataloaders(
         preprocessing_config=preprocessing_config,
     )
 
+    resolved_augmentation_mode = augmentation_mode
+    if resolved_augmentation_mode == "none" and augmentation:
+        resolved_augmentation_mode = "on_the_fly"
+    if resolved_augmentation_mode not in {"none", "on_the_fly", "offline_append"}:
+        raise ValueError(
+            "augmentation_mode must be one of 'none', 'on_the_fly', or 'offline_append'."
+        )
+
     resolved_augmentation_config = (
-        resolve_augmentation_config(augmentation_config) if augmentation else {}
+        resolve_augmentation_config(augmentation_config)
+        if resolved_augmentation_mode != "none"
+        else {}
     )
+
+    selected_real_train_size = len(y_train)
+    synthetic_train_size = 0
+    effective_X_train = X_train_proc
+    effective_y_train = y_train
+    augmentation_metadata: dict[str, object] = {
+        "augmentation_mode": resolved_augmentation_mode,
+        "augmentation_add_ratio": float(augmentation_add_ratio),
+        "real_train_size": int(selected_real_train_size),
+        "synthetic_train_size": 0,
+        "effective_train_size": int(selected_real_train_size),
+        "augmentation_config": resolved_augmentation_config,
+        "synthetic_generation_seed": seed,
+    }
+    if resolved_augmentation_mode == "offline_append":
+        (
+            effective_X_train,
+            effective_y_train,
+            augmentation_metadata,
+        ) = make_augmented_training_set(
+            X_train_proc,
+            y_train,
+            augmentation_add_ratio=augmentation_add_ratio,
+            seed=seed,
+            augmentation_config=resolved_augmentation_config,
+        )
+        synthetic_train_size = int(augmentation_metadata["synthetic_train_size"])
+    elif resolved_augmentation_mode == "on_the_fly":
+        augmentation_metadata["augmentation_mode"] = "on_the_fly"
+
     train_dataset, val_dataset, test_dataset = make_tensor_datasets(
-        X_train_proc,
-        y_train,
+        effective_X_train,
+        effective_y_train,
         X_val_proc,
         y_val,
         X_test_proc,
         y_test,
-        augmentation=augmentation,
-        augmentation_config=resolved_augmentation_config if augmentation else None,
+        augmentation_mode=resolved_augmentation_mode,
+        augmentation_config=(
+            resolved_augmentation_config if resolved_augmentation_mode == "on_the_fly" else None
+        ),
         seed=seed,
     )
 
@@ -170,9 +220,12 @@ def create_uthar_dataloaders(
     metadata = {
         "model_type": model_type,
         "num_classes": 7,
-        "input_shape": tuple(X_train_proc.shape[1:]),
+        "input_shape": tuple(effective_X_train.shape[1:]),
         "train_size": len(train_dataset),
         "selected_train_size": len(train_dataset),
+        "selected_real_train_size": int(selected_real_train_size),
+        "synthetic_train_size": int(synthetic_train_size),
+        "effective_train_size": len(train_dataset),
         "full_train_size": len(full_X_train),
         # Rubric: validation/test are kept unchanged for fair low-data and M5
         # augmentation comparisons.
@@ -183,8 +236,11 @@ def create_uthar_dataloaders(
         "preprocessing_steps": preprocessing_bundle["preprocessing_steps"],
         "preprocessing_config": preprocessing_bundle["preprocessing_config"],
         "preprocessing_metadata": preprocessing_bundle["preprocessing_metadata"],
-        "augmentation": augmentation,
+        "augmentation": resolved_augmentation_mode != "none",
+        "augmentation_mode": resolved_augmentation_mode,
+        "augmentation_add_ratio": float(augmentation_add_ratio),
         "augmentation_config": resolved_augmentation_config,
+        "augmentation_metadata": augmentation_metadata,
         "class_counts_selected": class_counts_selected,
     }
     return train_loader, val_loader, test_loader, metadata

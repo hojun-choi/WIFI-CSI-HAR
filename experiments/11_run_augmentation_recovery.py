@@ -44,7 +44,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--preprocessing", default="per_sample_zscore")
+    parser.add_argument("--preprocessing", default="moving_average_smoothing+minmax_scaling")
+    parser.add_argument(
+        "--augmentation-mode",
+        choices=["none", "offline_append", "on_the_fly"],
+        default="offline_append",
+    )
+    parser.add_argument("--augmentation-add-ratio", type=float, default=1.0)
     parser.add_argument(
         "--warmup-epochs",
         type=int,
@@ -78,6 +84,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", default="data/UT_HAR")
     parser.add_argument("--smoke-test", action="store_true")
     parser.add_argument("--disable-regenerate-figures", action="store_true")
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
 
@@ -137,6 +145,8 @@ def _write_results_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
         "model",
         "real_ratio",
         "augmentation",
+        "augmentation_mode",
+        "augmentation_add_ratio",
         "preprocessing",
         "seed",
         "training_mode",
@@ -152,6 +162,9 @@ def _write_results_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
         "device",
         "full_train_size",
         "selected_train_size",
+        "selected_real_train_size",
+        "synthetic_train_size",
+        "effective_train_size",
         "val_size",
         "test_size",
         "augmentation_config",
@@ -187,26 +200,90 @@ def _resolve_smoke_test(args: argparse.Namespace) -> None:
         args.epochs = 5
 
 
+def _resolve_output_csv_path(args: argparse.Namespace) -> Path:
+    metrics_dir = PROJECT_ROOT / "results" / "metrics"
+    return (
+        metrics_dir / "final_augmentation_smoke_test_results.csv"
+        if args.smoke_test
+        else metrics_dir / "final_augmentation_results.csv"
+    )
+
+
+def _validate_output_path(csv_path: Path, overwrite: bool, dry_run: bool) -> None:
+    if dry_run:
+        return
+    if csv_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"Official augmentation output already exists: {csv_path}. "
+            "Delete it first or rerun with --overwrite."
+        )
+
+
+def _estimate_run_metadata(
+    args: argparse.Namespace,
+    normalized_models: list[str],
+    augmentation_config: dict[str, object],
+) -> list[dict[str, object]]:
+    estimates: list[dict[str, object]] = []
+    for model_name in normalized_models:
+        for real_ratio in args.real_ratios:
+            _, _, _, metadata = create_uthar_dataloaders(
+                data_root=PROJECT_ROOT / args.data_root,
+                batch_size=args.batch_size,
+                preprocessing=args.preprocessing,
+                real_ratio=real_ratio,
+                seed=args.seed,
+                model_type=model_name,
+                augmentation_mode=args.augmentation_mode,
+                augmentation_add_ratio=args.augmentation_add_ratio,
+                augmentation_config=augmentation_config,
+            )
+            estimates.append(
+                {
+                    "model": model_name,
+                    "real_ratio": real_ratio,
+                    "selected_real_train_size": metadata["selected_real_train_size"],
+                    "synthetic_train_size": metadata["synthetic_train_size"],
+                    "effective_train_size": metadata["effective_train_size"],
+                    "val_size": metadata["val_size"],
+                    "test_size": metadata["test_size"],
+                    "augmentation_mode": metadata["augmentation_mode"],
+                    "augmentation_add_ratio": metadata["augmentation_add_ratio"],
+                }
+            )
+    return estimates
+
+
 def _attach_augmentation_gains(
     rows: list[dict[str, object]],
     low_data_csv_path: Path,
 ) -> tuple[list[dict[str, object]], bool]:
     if not low_data_csv_path.exists():
-        print(f"Warning: no-augmentation baseline CSV not found: {low_data_csv_path}")
-        return rows, False
+        raise FileNotFoundError(
+            f"F4 no-augmentation baseline CSV not found: {low_data_csv_path}. "
+            "Run or preserve F4 official results first."
+        )
 
     aug_frame = pd.DataFrame(rows)
     no_aug_frame = pd.read_csv(low_data_csv_path)
     if aug_frame.empty:
         return rows, True
 
-    compare_cols = ["model", "real_ratio", "test_macro_f1", "test_accuracy"]
+    compare_cols = ["model", "real_ratio", "preprocessing", "test_macro_f1", "test_accuracy"]
     merged = aug_frame.merge(
         no_aug_frame[compare_cols],
-        on=["model", "real_ratio"],
+        on=["model", "real_ratio", "preprocessing"],
         how="left",
         suffixes=("", "_no_aug"),
     )
+
+    missing_mask = merged["test_macro_f1_no_aug"].isna() | merged["test_accuracy_no_aug"].isna()
+    if missing_mask.any():
+        missing_rows = merged.loc[missing_mask, ["model", "real_ratio", "preprocessing"]]
+        raise ValueError(
+            "Missing same-real_ratio F4 baseline rows for augmentation comparison: "
+            f"{missing_rows.to_dict(orient='records')}"
+        )
 
     merged["no_aug_test_macro_f1"] = merged["test_macro_f1_no_aug"]
     merged["no_aug_test_accuracy"] = merged["test_accuracy_no_aug"]
@@ -231,10 +308,15 @@ def main() -> None:
         raise ValueError("epochs must be positive.")
     if any(ratio <= 0 or ratio > 1.0 for ratio in args.real_ratios):
         raise ValueError("All real_ratio values must be in the range (0, 1].")
+    if args.augmentation_add_ratio < 0:
+        raise ValueError("augmentation_add_ratio must be non-negative.")
 
     augmentation_config = resolve_augmentation_config(DEFAULT_AUGMENTATION_CONFIG)
+    output_csv_path = _resolve_output_csv_path(args)
     resolved_config = {
         "experiment": "augmentation_recovery",
+        "benchmark_top3": args.use_benchmark_top3,
+        "benchmark_top5": args.use_benchmark_top5,
         "models": normalized_models,
         "real_ratios": args.real_ratios,
         "epochs": args.epochs,
@@ -242,7 +324,9 @@ def main() -> None:
         "batch_size": args.batch_size,
         "preprocessing": args.preprocessing,
         "training_mode": "controlled_generalization",
-        "augmentation": "true",
+        "augmentation": "true" if args.augmentation_mode != "none" else "false",
+        "augmentation_mode": args.augmentation_mode,
+        "augmentation_add_ratio": args.augmentation_add_ratio,
         "warmup_epochs": args.warmup_epochs,
         "patience": args.patience,
         "min_delta": args.min_delta,
@@ -251,9 +335,21 @@ def main() -> None:
         "scheduler_type": args.scheduler_type,
         "augmentation_config": augmentation_config,
         "smoke_test": args.smoke_test,
+        "dry_run": args.dry_run,
+        "output_csv_path": str(output_csv_path),
     }
     print("Resolved config:")
     print(resolved_config)
+
+    estimates = _estimate_run_metadata(args, normalized_models, augmentation_config)
+    print("Dry-run metadata estimates:")
+    for estimate in estimates:
+        print(estimate)
+
+    if args.dry_run:
+        return
+
+    _validate_output_path(output_csv_path, overwrite=args.overwrite, dry_run=args.dry_run)
 
     device = get_device()
     rows: list[dict[str, object]] = []
@@ -269,7 +365,8 @@ def main() -> None:
                 real_ratio=real_ratio,
                 seed=args.seed,
                 model_type=model_name,
-                augmentation=True,
+                augmentation_mode=args.augmentation_mode,
+                augmentation_add_ratio=args.augmentation_add_ratio,
                 augmentation_config=augmentation_config,
             )
             print("Data metadata:", metadata)
@@ -317,7 +414,9 @@ def main() -> None:
                     "experiment": "augmentation_recovery",
                     "model": model_name,
                     "real_ratio": real_ratio,
-                    "augmentation": "true",
+                    "augmentation": "true" if args.augmentation_mode != "none" else "false",
+                    "augmentation_mode": args.augmentation_mode,
+                    "augmentation_add_ratio": args.augmentation_add_ratio,
                     "preprocessing": args.preprocessing,
                     "seed": args.seed,
                     "training_mode": "controlled_generalization",
@@ -333,6 +432,9 @@ def main() -> None:
                     "device": str(device),
                     "full_train_size": metadata["full_train_size"],
                     "selected_train_size": metadata["selected_train_size"],
+                    "selected_real_train_size": metadata["selected_real_train_size"],
+                    "synthetic_train_size": metadata["synthetic_train_size"],
+                    "effective_train_size": metadata["effective_train_size"],
                     "val_size": metadata["val_size"],
                     "test_size": metadata["test_size"],
                     "augmentation_config": json.dumps(metadata["augmentation_config"], sort_keys=True),
@@ -360,14 +462,8 @@ def main() -> None:
     if gains_attached:
         print("Attached augmentation gains using results/metrics/final_low_data_results.csv")
 
-    metrics_dir = PROJECT_ROOT / "results" / "metrics"
-    csv_path = (
-        metrics_dir / "final_augmentation_smoke_test_results.csv"
-        if args.smoke_test
-        else metrics_dir / "final_augmentation_results.csv"
-    )
-    _write_results_csv(csv_path, rows)
-    print(f"Saved augmentation results to: {csv_path}")
+    _write_results_csv(output_csv_path, rows)
+    print(f"Saved augmentation results to: {output_csv_path}")
 
     if args.smoke_test:
         print("Smoke test mode: skipped full figure regeneration.")

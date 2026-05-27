@@ -234,6 +234,8 @@ output:
 - `results/figures/final_augmentation_25_10_summary.png`
 
 F5 interpretation is always relative to the F4 no-augmentation baseline, and report generation automatically embeds generated F5 figures when they exist.
+Official F5 uses `augmentation_mode=offline_append` and compares the same `real_ratio` against the same `real_ratio`.
+`augmentation_add_ratio=1.0` means one synthetic sample is appended for each selected real train sample.
 
 ### F6. Final Report
 
