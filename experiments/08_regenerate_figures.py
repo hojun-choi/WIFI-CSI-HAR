@@ -12,7 +12,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.visualization import (
+    build_final_augmentation_ablation_summary_by_add_ratio,
     save_augmentation_recovery_plots,
+    save_final_augmentation_ablation_plots,
+    save_final_augmentation_ablation_summary_plots,
     save_baseline_original_epoch_plots,
     save_final_augmentation_plots,
     save_final_preprocessing_plots,
@@ -36,6 +39,12 @@ def regenerate_report_figures(project_root: Path | None = None) -> list[Path]:
     final_low_data_csv = root / "results" / "metrics" / "final_low_data_results.csv"
     augmentation_csv = root / "results" / "metrics" / "augmentation_results.csv"
     final_augmentation_csv = root / "results" / "metrics" / "final_augmentation_results.csv"
+    final_augmentation_ablation_csv = (
+        root / "results" / "metrics" / "final_augmentation_ratio_ablation_results.csv"
+    )
+    final_augmentation_ablation_summary_csv = (
+        root / "results" / "metrics" / "final_augmentation_ratio_ablation_summary_by_add_ratio.csv"
+    )
     preprocessing_csv = root / "results" / "metrics" / "preprocessing_ablation_results.csv"
     final_preprocessing_csv = root / "results" / "metrics" / "final_preprocessing_results.csv"
     final_preprocessing_combination_csv = (
@@ -82,6 +91,27 @@ def regenerate_report_figures(project_root: Path | None = None) -> list[Path]:
     else:
         print(
             f"Skipped official augmentation figures because CSV was not found: {final_augmentation_csv}"
+        )
+
+    if final_augmentation_ablation_csv.exists():
+        _, summary_csv_path = build_final_augmentation_ablation_summary_by_add_ratio(
+            final_augmentation_ablation_csv,
+            final_augmentation_ablation_summary_csv,
+        )
+        created_files.extend(
+            save_final_augmentation_ablation_plots(final_augmentation_ablation_csv, figures_dir)
+        )
+        created_files.extend(
+            save_final_augmentation_ablation_summary_plots(summary_csv_path, figures_dir)
+        )
+        print(
+            "Generated official augmentation ablation figures from "
+            "final_augmentation_ratio_ablation_results.csv"
+        )
+    else:
+        print(
+            "Skipped official augmentation ablation figures because CSV was not found: "
+            f"{final_augmentation_ablation_csv}"
         )
 
     if preprocessing_csv.exists():

@@ -1,42 +1,46 @@
 # Wi-Fi CSI HAR Final Experiment Plan
 
-이전 개발 과정에서 생성된 prototype artifacts는 정리되었고, 최종 실험은 아래 F1부터 다시 수행한다.
+이전 개발 과정에서 생성된 prototype artifacts는 정리되었고, 최종 실험은 아래 official F1-F5.1 workflow 기준으로 관리한다.
 
 ## 1. Problem Definition
 
-Wi-Fi CSI 기반 HAR는 행동 인식에 활용될 수 있지만, labeled data가 부족하거나 환경이 바뀌면 일반화가 어렵다. 같은 행동이라도 사용자, 공간, 배치, 노이즈 조건이 달라지면 CSI 분포가 변할 수 있기 때문이다.
-
-본 프로젝트는 `UT-HAR`를 사용해 다음을 순차적으로 검증한다.
+Wi-Fi CSI 기반 HAR는 행동 인식에 활용될 수 있지만, labeled data가 부족하거나 환경이 바뀌면 일반화가 어려워질 수 있다. 본 프로젝트는 `UT-HAR`를 사용하여 다음 순서로 문제를 검증한다.
 
 - benchmark model comparison
 - preprocessing comparison and final selection
 - low-data robustness
 - augmentation recovery
+- augmentation add ratio ablation
 
-핵심 원칙은 한 번에 여러 결론을 섞지 않고, F1 결과가 F2 후보를 정하고, F2/F3 결과가 F4/F5의 입력 조건을 고정하는 누적형 workflow를 유지하는 것이다.
+핵심 질문은 다음과 같다.
+
+- 어떤 모델과 preprocessing 조합이 UT-HAR에서 가장 안정적인가
+- train data가 줄어들어도 성능을 어느 정도 유지할 수 있는가
+- synthetic augmentation이 low-data 상황을 실제로 보완하는가
+- synthetic sample 비율은 얼마나 사용하는 것이 적절한가
 
 ## 2. Dataset and Input Window
 
 - Dataset: `UT-HAR`
-- 이 저장소에서 로드하는 입력 array shape: `(N, 250, 90)`
-- 한 sample shape: `(250, 90)`
+- Input array shape in this repo: `(N, 250, 90)`
+- One sample shape: `(250, 90)`
 - `250 timesteps`는 초 단위 시간이 아니라 `CSI frame index`로 해석한다.
-- `90 CSI features`는 `Intel 5300 NIC` 스타일 해석에서 `30 subcarriers x 3 antenna pairs`로 볼 수 있다.
-- timestep을 초 단위로 바꾸려면 `sampling_rate`가 필요하다.
-- `sampling_rate = fs` Hz라면 한 sample duration은 `250 / fs` seconds이다.
-- `100Hz` 환산은 설명용 illustrative assumption일 뿐이며 confirmed ground truth로 사용하지 않는다.
+- `90 CSI features`는 benchmark 문맥상 `30 subcarriers x 3 antenna pairs`로 볼 수 있다.
+- 시간 환산에는 `sampling_rate`가 필요하다.
+- `sampling_rate = fs` Hz라면 sample duration은 `250 / fs` seconds이다.
+- `100Hz` 환산은 illustrative assumption일 뿐이며 confirmed ground truth로 사용하지 않는다.
 
 UT-HAR class names:
 
-- `0`: `lie down`
-- `1`: `fall`
-- `2`: `walk`
-- `3`: `pickup`
-- `4`: `run`
-- `5`: `sit down`
-- `6`: `stand up`
+- `lie down`
+- `fall`
+- `walk`
+- `pickup`
+- `run`
+- `sit down`
+- `stand up`
 
-Report-facing dataset visualization은 numeric label만 쓰지 않고 위 activity names를 사용한다.
+Report-facing visualization은 numeric label 대신 activity name을 사용한다.
 
 ## 3. Official Final Workflow
 
@@ -45,8 +49,8 @@ Report-facing dataset visualization은 numeric label만 쓰지 않고 위 activi
 목적:
 
 - `UT_HAR_data`에 대해 original benchmark model set을 최대한 그대로 실행한다.
-- F1은 official final workflow의 시작점이다.
-- F1 결과로 benchmark rank 1, top3, top5를 정한다.
+- official final workflow의 시작점으로 사용한다.
+- benchmark rank 1, top3, top5를 validation `Macro F1` 기준으로 선정한다.
 
 규칙:
 
@@ -58,62 +62,23 @@ Report-facing dataset visualization은 numeric label만 쓰지 않고 위 activi
 - selection metric = validation `Macro F1`
 - test `Macro F1` is confirmation only
 
-F1 benchmark model set:
-
-- `MLP`
-- `LeNet`
-- `ResNet18`
-- `ResNet50`
-- `ResNet101`
-- `RNN`
-- `GRU`
-- `LSTM`
-- `BiLSTM`
-- `CNN+GRU`
-- `ViT`
-
-지원 원칙:
-
-- runner는 위 original supervised model list를 우선 지원한다.
-- 어떤 model이 현재 wrapper에서 실행되지 않으면 조용히 제외하지 않는다.
-- unsupported model은 이유와 함께 `final_benchmark_results.csv` 및 `docs/final_benchmark_selection.md`에 명시한다.
-
 output:
 
 - `results/metrics/final_benchmark_results.csv`
 - `docs/final_benchmark_selection.md`
 
-selection:
-
-- benchmark rank 1 model
-- benchmark top3 models
-- benchmark top5 optional
-
 ### F2. Single Preprocessing Comparison
 
 목적:
 
-- F1에서 선택된 benchmark rank 1 model 하나를 사용해 individual preprocessing candidates를 one-by-one 비교한다.
+- F1 benchmark rank 1 model 하나를 사용해 preprocessing 후보를 one-by-one 비교한다.
 
 규칙:
 
 - F2부터는 `controlled_generalization`을 사용한다.
-- `original_epoch` fixed training은 F1까지만 사용한다.
-- single preprocessing comparison이 combination comparison보다 먼저 수행되어야 한다.
 - selection metric = validation `Macro F1`
 - test `Macro F1` is confirmation only
-
-individual candidates:
-
-- `none / raw`
-- `train_global_zscore`
-- `per_sample_zscore`
-- `minmax_scaling`
-- `robust_scaling`
-- `savgol_smoothing`
-- `moving_average_smoothing`
-- `train_featurewise_zscore`
-- `per_sample_featurewise_zscore`
+- single-method comparison을 combination comparison보다 먼저 수행한다.
 
 output:
 
@@ -123,81 +88,36 @@ output:
 
 목적:
 
-- F2 single-method 결과를 본 뒤, 유망하거나 논리적으로 상보적인 preprocessing combinations만 추가 비교한다.
-- blind combination search는 수행하지 않는다.
-- close candidate가 남으면 multi-seed validation stability check로 하나의 final preprocessing policy를 고정한다.
+- F2에서 유망한 combination만 추가 비교한다.
+- close candidate가 있을 경우 multi-seed stability check로 final preprocessing을 고정한다.
 
-candidate combinations:
+현재 확정 결과:
 
-- `savgol_smoothing + per_sample_zscore`
-- `savgol_smoothing + train_global_zscore`
-- `moving_average_smoothing + per_sample_zscore`
-- `minmax_scaling + savgol_smoothing` if justified
-
-selection rule:
-
-- primary metric = validation `Macro F1`
-- close candidate가 남으면 mean validation `Macro F1` across seeds를 우선한다.
-- close tolerance 안에서는 highest mean validation `Macro F1` candidate를 기본으로 유지한다.
-- 더 낮은 mean candidate는 `std_val_macro_f1` improvement가 `0.003` 이상일 때만 override할 수 있다.
-- test `Macro F1` is confirmation only
-- 점수가 비슷하면 더 단순하고 해석 가능한 preprocessing을 우선한다.
-
-output:
-
-- `docs/final_preprocessing_decision.md`
-
-## F3 Multi-seed Preprocessing Stability Check
-
-F2 single-seed 결과에서 close candidates가 남으면, test performance로 직접 선택하지 않고 F3 multi-seed stability check를 추가로 수행한다.
-
-기본 원칙:
-
-- benchmark rank 1 model 사용
-- `training_mode = controlled_generalization`
-- `real_ratio = 0.25`
-- `augmentation = false`
-- default seeds: `42`, `43`, `44`
-- primary selection criterion: mean validation `Macro F1` across seeds
-- stability is used only as a meaningful tie-break
-- a lower-mean candidate can override only if `std_val_macro_f1` improves by at least `0.003` within the close tolerance
-- test `Macro F1` is confirmation only
-
-default candidates:
-
-- `savgol_smoothing+train_global_zscore`
-- `moving_average_smoothing+minmax_scaling`
-- `train_featurewise_zscore`
-- `minmax_scaling`
-- `moving_average_smoothing`
-- current final preprocessing after F3: `moving_average_smoothing+minmax_scaling`
+- final preprocessing: `moving_average_smoothing+minmax_scaling`
 - selected by mean validation `Macro F1` across seeds
 - test `Macro F1` is confirmation only
 
-artifacts:
+output:
 
-- `results/metrics/final_preprocessing_stability_results.csv`
+- `results/metrics/final_preprocessing_combination_results.csv`
 - `results/metrics/final_preprocessing_stability_summary.csv`
-- `results/figures/final_preprocessing_stability_mean_val_macro_f1.png`
-- `results/figures/final_preprocessing_stability_val_test_macro_f1.png`
 - `docs/final_preprocessing_decision.md`
 
 ### F4. Low-data Robustness
 
 목적:
 
-- labeled train data가 줄어들 때 모델 성능이 어떻게 감소하는지 비교한다.
+- final preprocessing을 고정한 상태에서 labeled train data 감소에 따른 성능 저하를 측정한다.
 
 규칙:
 
-- final selected preprocessing 사용
-- benchmark top3 models를 기본으로 사용
-- benchmark top5는 runtime 여유가 있을 때만 optional extension으로 사용
+- preprocessing = `moving_average_smoothing+minmax_scaling`
+- benchmark top3 models 기본 사용: `ResNet18`, `LeNet`, `ResNet101`
 - `real_ratio = 1.0, 0.5, 0.25, 0.1`
 - `augmentation = false`
 - `training_mode = controlled_generalization`
-- `validation/test`는 unchanged
-- train split만 deterministic `stratified sampling`으로 축소
+- validation/test unchanged
+- train split만 deterministic stratified sampling으로 축소
 
 output:
 
@@ -207,23 +127,32 @@ output:
 - `results/figures/final_low_data_macro_f1_retention_by_ratio.png`
 - `results/figures/final_low_data_macro_f1_drop_by_ratio.png`
 
-Report generation automatically embeds generated F4 figures when they exist.
+figure semantics:
+
+- `final_low_data_macro_f1_by_ratio.png` shows raw test `Macro F1`
+- `final_low_data_macro_f1_retention_by_ratio.png` shows normalized retention relative to each model's own `real_ratio=1.0` baseline
+- in the retention plot, `100% = 1.0` by definition
+
+핵심 결과:
+
+- `ResNet18` is the strongest practical low-data model.
+- `real_ratio=0.25`에서 `ResNet18`은 test `Macro F1 = 0.9008`을 기록했다.
 
 ### F5. Augmentation Recovery
 
 목적:
 
-- low-data 조건에서 train-only augmentation이 성능 회복에 도움이 되는지 확인한다.
+- low-data 조건에서 synthetic augmentation이 F4 no-augmentation baseline 대비 성능을 회복하는지 평가한다.
 
 규칙:
 
-- final selected preprocessing 사용
-- F4와 동일한 benchmark top3/top5 model set 사용
+- `augmentation_mode = offline_append`
+- preprocessing = `moving_average_smoothing+minmax_scaling`
+- benchmark top3 model set 사용
 - `real_ratio = 0.5, 0.25, 0.1`
-- `augmentation = true`
-- augmentation은 train-only
-- `validation/test`는 절대 augmentation하지 않는다
-- F4 no-augmentation 결과와 직접 비교한다
+- validation/test는 never augmented
+- same-`real_ratio` rule:
+  augmentation 결과는 반드시 같은 model, 같은 `real_ratio`, 같은 preprocessing의 F4 baseline과만 비교한다.
 
 output:
 
@@ -232,20 +161,66 @@ output:
 - `results/figures/final_augmentation_gain_accuracy_by_ratio.png`
 - `results/figures/final_augmentation_macro_f1_aug_vs_no_aug.png`
 - `results/figures/final_augmentation_25_10_summary.png`
+- `results/figures/final_augmentation_gain_heatmap.png`
 
-F5 interpretation is always relative to the F4 no-augmentation baseline, and report generation automatically embeds generated F5 figures when they exist.
-Official F5 uses `augmentation_mode=offline_append` and compares the same `real_ratio` against the same `real_ratio`.
-`augmentation_add_ratio=1.0` means one synthetic sample is appended for each selected real train sample.
+요약:
+
+- `augmentation_add_ratio=1.0` 기준 official F5는 일부 조건에서 회복 효과를 보였지만, 모든 모델/ratio에서 일관되게 유리하지는 않았다.
+
+### F5.1. Augmentation Add Ratio Ablation
+
+목적:
+
+- `augmentation_add_ratio = 0.5, 1.0, 2.0`를 비교해 synthetic data 양이 augmentation 효과를 어떻게 바꾸는지 분석한다.
+
+규칙:
+
+- official F5와 동일한 `offline_append` design 사용
+- preprocessing = `moving_average_smoothing+minmax_scaling`
+- benchmark top3 models 사용
+- `real_ratio = 0.5, 0.25, 0.1`
+- same-`real_ratio` baseline comparison 유지
+- `augmentation_add_ratio=1.0` rows는 official F5 결과를 `source=reused_final_f5`로 재사용
+- `0.5`, `2.0` rows는 `source=trained_ablation`으로 별도 실행
+
+output:
+
+- `results/metrics/final_augmentation_ratio_ablation_results.csv`
+- `results/metrics/final_augmentation_ratio_ablation_summary_by_add_ratio.csv`
+- `results/figures/final_augmentation_ablation_macro_f1_by_add_ratio.png`
+- `results/figures/final_augmentation_ablation_gain_by_add_ratio.png`
+- `results/figures/final_augmentation_ablation_best_add_ratio_by_condition.png`
+- `results/figures/final_augmentation_ablation_heatmap.png`
+- `results/figures/final_augmentation_ablation_add_ratio_summary_macro_f1.png`
+- `results/figures/final_augmentation_ablation_add_ratio_summary_gain.png`
+- `results/figures/final_augmentation_ablation_add_ratio_positive_rate.png`
+- `results/figures/final_augmentation_ablation_add_ratio_accuracy_summary.png`
+
+완료 상태:
+
+- F5.1 augmentation_add_ratio ablation completed
+
+결과 요약:
+
+- `0.5` appears most stable on average
+- `1.0` is partially useful but not uniformly optimal
+- `2.0` can be too aggressive
+- synthetic data amount should be tuned rather than maximized
+- aggregate-by-`augmentation_add_ratio` summary analysis across the full 3x3 condition grid confirms that moderate synthetic ratio is more stable than aggressive synthetic ratio
+- augmentation showed limited and condition-dependent benefit, not a robust universal solution
+- F4 shows that low-data reduction is feasible, especially with `ResNet18`
+- F5/F5.1 show that simple augmentation is only partially helpful and does not solve low-data robustness consistently
+- future work should focus on physics-aware, class-conditional, and model-specific augmentation
+- official reporting should now use F1-F5.1 terminology consistently
 
 ### F6. Final Report
 
 규칙:
 
 - official final workflow outputs만 final evidence로 사용한다.
-- old prototype 결과를 final conclusion과 섞지 않는다.
-- report는 다음 내용을 포함한다.
+- prototype 결과는 final conclusion에 섞지 않는다.
 
-포함 항목:
+최종 보고서 포함 항목:
 
 - problem definition
 - dataset and input explanation
@@ -254,68 +229,28 @@ Official F5 uses `augmentation_mode=offline_append` and compares the same `real_
 - final preprocessing decision
 - low-data robustness
 - augmentation recovery
+- augmentation add ratio ablation
 - limitations
 - future work
 
 ## 4. Preprocessing Candidate Pool
 
-### `none / raw`
+- `none / raw`: baseline without normalization or smoothing
+- `train_global_zscore`: train split에서 fit한 mean/std를 `train/val/test`에 동일 적용
+- `per_sample_zscore`: sample별 독립 정규화
+- `minmax_scaling`: fixed range rescaling
+- `robust_scaling`: median/IQR 기반 scaling
+- `savgol_smoothing`: local temporal structure 보존을 기대하는 smoothing candidate
+- `moving_average_smoothing`: simple smoothing baseline
+- `train_featurewise_zscore`: train-only feature-wise z-score
+- `per_sample_featurewise_zscore`: sample별 feature-wise normalization
 
-- normalization이나 smoothing을 적용하지 않는 기준선이다.
-- preprocessing 효과를 판단하기 위한 baseline으로 사용한다.
+구현 규칙:
 
-### `train_global_zscore`
-
-- selected train split에서 mean/std를 추정한다.
-- 학습된 통계를 `train/val/test`에 동일하게 적용한다.
-- validation/test leakage를 피할 수 있다.
-
-### `per_sample_zscore`
-
-- 각 sample을 독립적으로 normalize한다.
-- sample-level amplitude variation을 줄이는 데 유용할 수 있다.
-- absolute amplitude cue를 일부 제거할 수 있다는 한계가 있다.
-
-### `Min-Max Normalization`
-
-- 값을 고정된 범위로 rescale한다.
-- gradient 안정성과 convergence 측면에서 도움이 될 수 있다.
-- signal noise를 제거하는 것이 아니라 scale만 바꾼다.
-
-### `Robust Scaling`
-
-- median/IQR 기반 scaling이다.
-- outlier에 더 강건할 수 있다.
-- CSI 열화가 outlier보다 fluctuation/noise 중심이면 효과가 제한될 수 있다.
-
-### `Savitzky-Golay Smoothing`
-
-- local temporal structure를 비교적 유지하면서 high-frequency noise를 억제할 가능성이 있는 candidate이다.
-- official F2/F3 결과 전에는 superiority를 주장하지 않는다.
-- best method로 가정하지 않는다.
-
-### `Moving Average Smoothing`
-
-- 단순한 smoothing baseline이다.
-- noise 감소에는 도움이 될 수 있지만 activity pattern을 blur할 수 있다.
-
-### `train_featurewise_zscore`
-
-- selected train split에서 feature별 mean/std를 학습한다.
-- global z-score보다 feature-aware한 scaling이다.
-
-### `per_sample_featurewise_zscore`
-
-- 각 sample 내부에서 feature별 time-axis normalization을 수행한다.
-- feature별 temporal scale variation을 줄일 수 있다.
-- 유용한 amplitude cue를 제거할 수 있다.
-
-Preprocessing implementation rules:
-
-- train-stat 기반 transform은 selected train split에만 fit한다.
-- fit된 train statistics를 `train/val/test`에 적용한다.
+- train-stat transform은 selected train split에만 fit한다.
+- fitted statistics는 `train/val/test`에 적용한다.
 - deterministic smoothing은 `train/val/test`에 일관되게 적용한다.
-- augmentation은 preprocessing과 분리되며 train-only로 유지한다.
+- augmentation은 preprocessing과 분리하여 train-only로 사용한다.
 
 ## 5. Evaluation Metrics
 
@@ -323,28 +258,33 @@ Preprocessing implementation rules:
 - `Macro F1`
 - `Weighted F1`
 - `Confusion Matrix` where useful
-
-low-data degradation metrics:
-
-- `macro_f1_drop`
-- `macro_f1_retention`
-- `accuracy_drop`
-- `accuracy_retention`
-
-augmentation gain metrics:
-
-- `augmentation_gain_macro_f1`
-- `augmentation_gain_accuracy`
+- low-data degradation metrics:
+  - `macro_f1_drop`
+  - `macro_f1_retention`
+  - `accuracy_drop`
+  - `accuracy_retention`
+- augmentation gain metrics:
+  - `augmentation_gain_macro_f1`
+  - `augmentation_gain_accuracy`
 
 ## 6. Execution Checklist
 
-- [ ] Clean old generated artifacts
-- [ ] F1 original benchmark full run completed
-- [ ] Benchmark rank 1 selected
-- [ ] Benchmark top3/top5 selected
-- [ ] F2 single preprocessing comparison completed
-- [ ] F3 preprocessing combination comparison completed
-- [ ] Final preprocessing selected
-- [ ] F4 low-data robustness completed
-- [ ] F5 augmentation recovery completed
-- [ ] Final report generated
+- [x] Clean old generated artifacts
+- [x] F1 original benchmark full run completed
+- [x] Benchmark rank 1 selected
+- [x] Benchmark top3 selected
+- [x] F2 single preprocessing comparison completed
+- [x] F3 preprocessing combination comparison completed
+- [x] Final preprocessing selected
+- [x] F4 low-data robustness completed
+- [x] F5 augmentation recovery completed
+- [x] F5.1 augmentation_add_ratio ablation completed
+- [ ] Multi-seed F5.1 validation completed
+- [ ] Final report packaging completed
+
+## 7. Next Recommended Work
+
+- multi-seed F5.1
+- finer augmentation ratio search
+- class/model-specific augmentation
+- physics-aware CSI augmentation

@@ -48,6 +48,22 @@ def _figure_gallery(root: Path, figures: list[tuple[str, str]]) -> str:
     return "\n\n".join(_figure_markdown(root, path, caption) for path, caption in figures)
 
 
+def _figure_row_html(root: Path, figures: list[tuple[str, str]]) -> str:
+    cells: list[str] = []
+    for relative_path, caption in figures:
+        figure_path = root / relative_path
+        if figure_path.exists():
+            report_relative = (Path("..") / Path(relative_path)).as_posix()
+            image_html = (
+                f'<img src="{report_relative}" alt="{caption}" width="100%"><br>'
+                f"<sub>{caption}</sub>"
+            )
+        else:
+            image_html = f"<sub>Figure not generated yet: {relative_path}</sub>"
+        cells.append(f"<td align=\"center\" valign=\"top\" width=\"33%\">{image_html}</td>")
+    return "<table><tr>" + "".join(cells) + "</tr></table>"
+
+
 def _dataset_section(root: Path) -> str:
     activity_names = ", ".join(UT_HAR_CLASS_NAMES[class_id] for class_id in UT_HAR_CLASS_ORDER)
     figures = [
@@ -79,6 +95,7 @@ def _current_official_status(
     f3_exists: bool,
     f4_exists: bool,
     f5_exists: bool,
+    f51_exists: bool,
     selected_preprocessing: str | None,
 ) -> str:
     lines = [
@@ -94,6 +111,7 @@ def _current_official_status(
         ),
         f"- F4 low-data robustness: {'completed' if f4_exists else 'not completed yet'}",
         f"- F5 augmentation recovery: {'completed' if f5_exists else 'not completed yet'}",
+        f"- F5.1 augmentation add ratio ablation: {'completed' if f51_exists else 'not completed yet'}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -324,11 +342,11 @@ F3 multi-seed preprocessing stability check has not been completed yet.
 
 def _low_data_figure_gallery(root: Path) -> str:
     figures = [
-        ("results/figures/final_low_data_macro_f1_by_ratio.png", "Low-data robustness test Macro F1 by train ratio"),
-        ("results/figures/final_low_data_accuracy_by_ratio.png", "Low-data robustness test accuracy by train ratio"),
-        ("results/figures/final_low_data_macro_f1_retention_by_ratio.png", "Macro F1 retention under reduced training data"),
+        ("results/figures/final_low_data_macro_f1_by_ratio.png", "Low-data robustness raw test Macro F1 by train ratio"),
+        ("results/figures/final_low_data_accuracy_by_ratio.png", "Low-data robustness raw test accuracy by train ratio"),
+        ("results/figures/final_low_data_macro_f1_retention_by_ratio.png", "Normalized Macro F1 retention under reduced training data"),
         ("results/figures/final_low_data_macro_f1_drop_by_ratio.png", "Macro F1 drop under reduced training data"),
-        ("results/figures/final_low_data_25_10_summary.png", "Low-data robustness summary at 25% and 10%"),
+        ("results/figures/final_low_data_25_10_summary.png", "Low-data robustness summary at 25% and 10% (raw test Macro F1)"),
     ]
     return _figure_gallery(root, figures)
 
@@ -383,6 +401,13 @@ def _f4_interpretation(frame: pd.DataFrame) -> str:
         lines.append(
             f"- At 10%, the best Macro F1 retention belongs to `{best_retention['model']}` "
             f"({_format_float(best_retention['macro_f1_retention'])})."
+        )
+        lines.append(
+            "- The raw Macro F1 figure and the retention figure should be read differently: "
+            "raw Macro F1 shows actual performance, while retention is normalized to each model's own 100% baseline."
+        )
+        lines.append(
+            "- In the retention plot, 100% training data appears as 1.0 by definition because each model is divided by its own full-data result."
         )
 
     return "\n".join(lines) + "\n"
@@ -583,11 +608,386 @@ F5 augmentation recovery has not been completed yet under the current offline ap
     return "\n".join(lines) + "\n"
 
 
-def _next_step_section(f5_exists: bool) -> str:
-    if f5_exists:
+def _augmentation_ablation_figure_gallery(root: Path) -> str:
+    figures = [
+        (
+            "results/figures/final_augmentation_ablation_macro_f1_by_add_ratio.png",
+            "Augmentation ablation raw test Macro F1 by add ratio",
+        ),
+        (
+            "results/figures/final_augmentation_ablation_gain_by_add_ratio.png",
+            "Augmentation add ratio ablation Macro F1 gain",
+        ),
+        (
+            "results/figures/final_augmentation_ablation_best_add_ratio_by_condition.png",
+            "Best augmentation_add_ratio by condition",
+        ),
+        (
+            "results/figures/final_augmentation_ablation_heatmap.png",
+            "Augmentation add ratio ablation heatmap",
+        ),
+    ]
+    return _figure_gallery(root, figures)
+
+
+def _augmentation_ablation_aggregate_figure_gallery(root: Path) -> str:
+    figures = [
+        (
+            "results/figures/final_augmentation_ablation_add_ratio_summary_macro_f1.png",
+            "Aggregate F5.1 raw test Macro F1 and gain by augmentation_add_ratio",
+        ),
+        (
+            "results/figures/final_augmentation_ablation_add_ratio_summary_gain.png",
+            "Aggregate F5.1 Macro F1 gain by augmentation_add_ratio",
+        ),
+        (
+            "results/figures/final_augmentation_ablation_add_ratio_positive_rate.png",
+            "Aggregate F5.1 positive-gain rate by augmentation_add_ratio",
+        ),
+        (
+            "results/figures/final_augmentation_ablation_add_ratio_accuracy_summary.png",
+            "Aggregate F5.1 raw test Accuracy by augmentation_add_ratio",
+        ),
+    ]
+    return _figure_gallery(root, figures)
+
+
+def _augmentation_ablation_interpretation(frame: pd.DataFrame) -> str:
+    if frame.empty or "augmentation_gain_macro_f1" not in frame.columns:
+        return ""
+
+    working = frame.copy()
+    for column in [
+        "real_ratio",
+        "augmentation_add_ratio",
+        "selected_real_train_size",
+        "synthetic_train_size",
+        "effective_train_size",
+        "no_aug_test_macro_f1",
+        "test_macro_f1",
+        "augmentation_gain_macro_f1",
+    ]:
+        if column in working.columns:
+            working[column] = pd.to_numeric(working[column], errors="coerce")
+
+    lines = ["### F5.1 Interpretation", ""]
+    gain_counts = (
+        working.assign(
+            gain_sign=working["augmentation_gain_macro_f1"].apply(
+                lambda value: "positive" if value > 0 else ("negative" if value < 0 else "zero")
+            )
+        )
+        .groupby("augmentation_add_ratio")["gain_sign"]
+        .value_counts()
+        .unstack(fill_value=0)
+    )
+    for add_ratio, row in gain_counts.sort_index().iterrows():
+        lines.append(
+            f"- augmentation_add_ratio={float(add_ratio):g}: "
+            f"positive {int(row.get('positive', 0))}, "
+            f"negative {int(row.get('negative', 0))}, "
+            f"zero {int(row.get('zero', 0))}."
+        )
+
+    mean_gain = (
+        working.groupby("augmentation_add_ratio", as_index=False)["augmentation_gain_macro_f1"]
+        .mean()
+        .sort_values(by=["augmentation_add_ratio"], ascending=[True])
+    )
+    for _, row in mean_gain.iterrows():
+        lines.append(
+            f"- Mean augmentation_gain_macro_f1 at augmentation_add_ratio={float(row['augmentation_add_ratio']):g}: "
+            f"{_format_float(row['augmentation_gain_macro_f1'])}."
+        )
+
+    mean_test = (
+        working.groupby("augmentation_add_ratio", as_index=False)["test_macro_f1"]
+        .mean()
+        .sort_values(by=["augmentation_add_ratio"], ascending=[True])
+    )
+    for _, row in mean_test.iterrows():
+        lines.append(
+            f"- Mean test_macro_f1 at augmentation_add_ratio={float(row['augmentation_add_ratio']):g}: "
+            f"{_format_float(row['test_macro_f1'])}."
+        )
+
+    best_rows = (
+        working.sort_values(
+            by=["model", "real_ratio", "test_macro_f1", "augmentation_gain_macro_f1"],
+            ascending=[True, True, False, False],
+        )
+        .groupby(["model", "real_ratio"], as_index=False)
+        .first()
+    )
+    best_summary = ", ".join(
+        f"{row['model']}@{float(row['real_ratio']):g}->{float(row['augmentation_add_ratio']):g}"
+        for _, row in best_rows.iterrows()
+    )
+    lines.append(f"- Best augmentation_add_ratio by condition: {best_summary}.")
+
+    best_add_counts = best_rows["augmentation_add_ratio"].value_counts().sort_index()
+    if not best_add_counts.empty:
+        most_frequent_add_ratio = float(best_add_counts.idxmax())
+        lines.append(
+            f"- augmentation_add_ratio={most_frequent_add_ratio:g} is most often best across model/ratio conditions."
+        )
+    if not mean_gain.empty:
+        best_mean_row = mean_gain.sort_values(by=["augmentation_gain_macro_f1"], ascending=[False]).iloc[0]
+        worst_mean_row = mean_gain.sort_values(by=["augmentation_gain_macro_f1"], ascending=[True]).iloc[0]
+        lines.append(
+            f"- The most stable average gain appears at augmentation_add_ratio={float(best_mean_row['augmentation_add_ratio']):g}, "
+            f"while augmentation_add_ratio={float(worst_mean_row['augmentation_add_ratio']):g} is weakest on average."
+        )
+
+    severe_collapse = working.sort_values(by=["test_macro_f1", "augmentation_gain_macro_f1"], ascending=[True, True]).iloc[0]
+    if float(severe_collapse["augmentation_gain_macro_f1"]) < -0.2:
+        lines.append(
+            f"- Severe collapse case: `{severe_collapse['model']}` at `real_ratio={float(severe_collapse['real_ratio']):g}` "
+            f"with augmentation_add_ratio={float(severe_collapse['augmentation_add_ratio']):g} drops to "
+            f"test_macro_f1={_format_float(severe_collapse['test_macro_f1'])}."
+        )
+
+    lines.append("- Synthetic data is not simply the more the better; augmentation strength should be tuned by model and real_ratio.")
+
+    return "\n".join(lines) + "\n"
+
+
+def _augmentation_ablation_aggregate_table(frame: pd.DataFrame) -> str:
+    lines = [
+        "| augmentation_add_ratio | n_conditions | mean_test_macro_f1 | std_test_macro_f1 | mean_augmentation_gain_macro_f1 | std_augmentation_gain_macro_f1 | positive_gain_rate | positive_gain_count | source mix |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for _, row in frame.iterrows():
+        source_mix = (
+            f"reused={int(pd.to_numeric(row.get('reused_final_f5_count'), errors='coerce') or 0)}, "
+            f"trained={int(pd.to_numeric(row.get('trained_ablation_count'), errors='coerce') or 0)}, "
+            f"existing={int(pd.to_numeric(row.get('existing_ablation_count'), errors='coerce') or 0)}"
+        )
+        lines.append(
+            f"| {_format_float(row['augmentation_add_ratio'])} | {int(row['n_conditions'])} | "
+            f"{_format_float(row['mean_test_macro_f1'])} | {_format_float(row['std_test_macro_f1'])} | "
+            f"{_format_float(row['mean_augmentation_gain_macro_f1'])} | {_format_float(row['std_augmentation_gain_macro_f1'])} | "
+            f"{_format_float(float(row['positive_gain_rate']) * 100.0, digits=1)}% | "
+            f"{int(row['positive_gain_count'])} | {source_mix} |"
+        )
+    return "\n".join(lines)
+
+
+def _augmentation_ablation_aggregate_interpretation(summary_frame: pd.DataFrame) -> str:
+    if summary_frame.empty:
+        return ""
+    working = summary_frame.copy()
+    numeric_columns = [
+        "augmentation_add_ratio",
+        "n_conditions",
+        "mean_test_macro_f1",
+        "std_test_macro_f1",
+        "mean_augmentation_gain_macro_f1",
+        "std_augmentation_gain_macro_f1",
+        "positive_gain_rate",
+        "positive_gain_count",
+        "zero_or_negative_gain_count",
+    ]
+    for column in numeric_columns:
+        if column in working.columns:
+            working[column] = pd.to_numeric(working[column], errors="coerce")
+    working = working.sort_values(by=["augmentation_add_ratio"], ascending=[True]).reset_index(drop=True)
+
+    best_mean_macro = working.sort_values(
+        by=["mean_test_macro_f1", "mean_augmentation_gain_macro_f1"],
+        ascending=[False, False],
+    ).iloc[0]
+    best_mean_gain = working.sort_values(
+        by=["mean_augmentation_gain_macro_f1", "mean_test_macro_f1"],
+        ascending=[False, False],
+    ).iloc[0]
+    best_positive_rate = working.sort_values(
+        by=["positive_gain_rate", "mean_augmentation_gain_macro_f1"],
+        ascending=[False, False],
+    ).iloc[0]
+    worst_mean_gain = working.sort_values(
+        by=["mean_augmentation_gain_macro_f1", "std_augmentation_gain_macro_f1"],
+        ascending=[True, False],
+    ).iloc[0]
+    highest_std = working.sort_values(
+        by=["std_augmentation_gain_macro_f1", "std_test_macro_f1"],
+        ascending=[False, False],
+    ).iloc[0]
+
+    lines = [
+        "### F5.1 Aggregate Interpretation",
+        "",
+        "- These aggregate statistics collapse the full F5.1 grid into three augmentation_add_ratio groups, each covering up to 9 model/real_ratio conditions.",
+        f"- Highest mean_test_macro_f1: augmentation_add_ratio={float(best_mean_macro['augmentation_add_ratio']):g} ({_format_float(best_mean_macro['mean_test_macro_f1'])}).",
+        f"- Highest mean_augmentation_gain_macro_f1: augmentation_add_ratio={float(best_mean_gain['augmentation_add_ratio']):g} ({_format_float(best_mean_gain['mean_augmentation_gain_macro_f1'])}).",
+        f"- Best positive_gain_rate: augmentation_add_ratio={float(best_positive_rate['augmentation_add_ratio']):g} "
+        f"({_format_float(float(best_positive_rate['positive_gain_rate']) * 100.0, digits=1)}%, "
+        f"{int(best_positive_rate['positive_gain_count'])}/{int(best_positive_rate['n_conditions'])}).",
+    ]
+    lines.append(
+        "- This should not be read as a clear augmentation success. The aggregate view shows limited and condition-dependent benefit rather than a robust universal fix."
+    )
+    lines.append(
+        "- augmentation_add_ratio=0.5 is the most stable aggregate choice: it has the highest mean test Macro F1, the highest mean Macro F1 gain, and it ties for the best positive-gain rate."
+    )
+    lines.append(
+        "- augmentation_add_ratio=1.0 is partially useful, but it is not the aggregate best and it improves only 5 of 9 conditions, the same positive-gain count as 0.5."
+    )
+    if float(highest_std["augmentation_add_ratio"]) == 2.0 or float(worst_mean_gain["augmentation_add_ratio"]) == 2.0:
+        lines.append(
+            "- Higher synthetic ratio is not consistently better. The aggregate summary shows that augmentation_add_ratio=2.0 has the weakest average gain and the highest instability, indicating that over-augmentation can harm robustness."
+        )
+    else:
+        lines.append(
+            "- Higher synthetic ratio is not consistently better across the 3x3 condition grid."
+        )
+    lines.append(
+        f"- The most unstable aggregate setting is augmentation_add_ratio={float(highest_std['augmentation_add_ratio']):g} "
+        f"(std_augmentation_gain_macro_f1={_format_float(highest_std['std_augmentation_gain_macro_f1'])})."
+    )
+    lines.append(
+        "- Positive-gain rate is only 5/9 for both 0.5 and 1.0, so even the better settings should be interpreted as partial recovery, not broad success."
+    )
+    lines.append(
+        "- The negative result is informative: simple offline_append synthetic augmentation can help some weak or collapsed conditions, but it does not generalize as a consistently reliable solution for CSI HAR low-data robustness."
+    )
+    lines.append(
+        "- A likely reason is that CSI is not image-like data. Naive synthetic transforms may fail to preserve physically meaningful channel structure, and too much synthetic data can distort the training distribution."
+    )
+    lines.append(
+        "- Future work should prioritize physics-aware augmentation, class-conditional augmentation, model-specific augmentation strength, and signal-structure-aware or environment-aware synthetic generation."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _augmentation_ablation_section(root: Path) -> str:
+    frame = _read_frame(root / "results" / "metrics" / "final_augmentation_ratio_ablation_results.csv")
+    if frame.empty:
+        return """## F5.1 Augmentation Add Ratio Ablation
+
+F5.1 augmentation_add_ratio ablation has not been run yet.
+"""
+
+    for column in [
+        "real_ratio",
+        "augmentation_add_ratio",
+        "selected_real_train_size",
+        "synthetic_train_size",
+        "effective_train_size",
+        "no_aug_test_macro_f1",
+        "test_macro_f1",
+        "augmentation_gain_macro_f1",
+    ]:
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    ordered = frame.sort_values(
+        by=["model", "real_ratio", "augmentation_add_ratio"],
+        ascending=[True, False, True],
+    ).reset_index(drop=True)
+    lines = [
+        "## F5.1 Augmentation Add Ratio Ablation",
+        "",
+        "- This ablation compares augmentation_add_ratio=0.5, 1.0, 2.0 under the same offline_append design.",
+        "- It reuses the official final preprocessing: `moving_average_smoothing+minmax_scaling`.",
+        "- It uses benchmark top3 models: `ResNet18`, `LeNet`, `ResNet101`.",
+        "- It keeps the same real-ratio settings: `0.5`, `0.25`, `0.1`.",
+        "- Each augmented result is compared only against the F4 no-augmentation baseline with the same model, same real_ratio, and same preprocessing.",
+        "- `augmentation_add_ratio=1.0` rows come from the completed official F5 run when `source=reused_final_f5`.",
+        "- `augmentation_add_ratio=0.5` and `2.0` rows are ablation-specific runs when `source=trained_ablation`.",
+        "",
+        "| model | real_ratio | augmentation_add_ratio | selected_real_train_size | synthetic_train_size | effective_train_size | no_aug_test_macro_f1 | test_macro_f1 | augmentation_gain_macro_f1 | source |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for _, row in ordered.iterrows():
+        lines.append(
+            f"| {row['model']} | {_format_float(row['real_ratio'])} | {_format_float(row['augmentation_add_ratio'])} | "
+            f"{_format_float(row.get('selected_real_train_size'), digits=0)} | "
+            f"{_format_float(row.get('synthetic_train_size'), digits=0)} | "
+            f"{_format_float(row.get('effective_train_size'), digits=0)} | "
+            f"{_format_float(row.get('no_aug_test_macro_f1'))} | {_format_float(row.get('test_macro_f1'))} | "
+            f"{_format_float(row.get('augmentation_gain_macro_f1'))} | {row.get('source', '-')} |"
+        )
+    lines.extend(
+        [
+            "",
+            _augmentation_ablation_interpretation(ordered),
+            _augmentation_ablation_figure_gallery(root),
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _augmentation_ablation_aggregate_section(root: Path) -> str:
+    summary_frame = _read_frame(
+        root / "results" / "metrics" / "final_augmentation_ratio_ablation_summary_by_add_ratio.csv"
+    )
+    if summary_frame.empty:
+        return """### F5.1 Aggregate Summary by augmentation_add_ratio
+
+F5.1 aggregate summary by augmentation_add_ratio has not been generated yet.
+"""
+
+    ordered = summary_frame.copy()
+    for column in [
+        "augmentation_add_ratio",
+        "n_conditions",
+        "mean_test_macro_f1",
+        "std_test_macro_f1",
+        "mean_augmentation_gain_macro_f1",
+        "std_augmentation_gain_macro_f1",
+        "positive_gain_rate",
+        "positive_gain_count",
+        "zero_or_negative_gain_count",
+        "reused_final_f5_count",
+        "trained_ablation_count",
+        "existing_ablation_count",
+    ]:
+        if column in ordered.columns:
+            ordered[column] = pd.to_numeric(ordered[column], errors="coerce")
+    ordered = ordered.sort_values(by=["augmentation_add_ratio"], ascending=[True]).reset_index(drop=True)
+
+    lines = [
+        "### F5.1 Aggregate Summary by augmentation_add_ratio",
+        "",
+        "- This aggregate layer groups only by `augmentation_add_ratio` and summarizes the full 3 models x 3 real_ratios grid.",
+        "- Each row below aggregates across up to 9 condition rows from the official F5.1 CSV.",
+        "",
+        _augmentation_ablation_aggregate_table(ordered),
+        "",
+        _augmentation_ablation_aggregate_interpretation(ordered),
+        _figure_markdown(
+            root,
+            "results/figures/final_augmentation_ablation_add_ratio_summary_macro_f1.png",
+            "Aggregate F5.1 raw test Macro F1 and gain by augmentation_add_ratio",
+        ),
+        "",
+        _figure_row_html(
+            root,
+            [
+                (
+                    "results/figures/final_augmentation_ablation_add_ratio_summary_gain.png",
+                    "Aggregate F5.1 Macro F1 gain by augmentation_add_ratio",
+                ),
+                (
+                    "results/figures/final_augmentation_ablation_add_ratio_positive_rate.png",
+                    "Aggregate F5.1 positive-gain rate by augmentation_add_ratio",
+                ),
+                (
+                    "results/figures/final_augmentation_ablation_add_ratio_accuracy_summary.png",
+                    "Aggregate F5.1 raw test Accuracy by augmentation_add_ratio",
+                ),
+            ],
+        ),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _next_step_section(f51_exists: bool) -> str:
+    if f51_exists:
         return """## Next Step
 
-F5 is complete, so the next step is final report regeneration and packaging from the official F1-F5 outputs.
+F5.1 is complete, so the next step is final report regeneration and packaging from the official F1-F5.1 outputs.
 
 Command:
 
@@ -598,18 +998,18 @@ python experiments/09_build_preliminary_report.py
 
     return """## Next Step
 
-F5 should be rerun with the official offline appended synthetic-data design.
+F5.1 augmentation_add_ratio ablation should be run before final packaging.
 
 Command:
 
 ```powershell
-python -u experiments/11_run_augmentation_recovery.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --augmentation-add-ratio 1.0 --seed 42 --batch-size 64 2>&1 | Tee-Object -FilePath logs\\final_augmentation_top3.log
+python -u experiments/17_run_augmentation_ratio_ablation.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --augmentation-add-ratios 0.5 1.0 2.0 --seed 42 --batch-size 64 2>&1 | Tee-Object -FilePath logs\\final_augmentation_ratio_ablation_top3.log
 ```
 
 OOM fallback:
 
 ```powershell
-python -u experiments/11_run_augmentation_recovery.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --augmentation-add-ratio 1.0 --seed 42 --batch-size 32 --overwrite 2>&1 | Tee-Object -FilePath logs\\final_augmentation_top3_bs32.log
+python -u experiments/17_run_augmentation_ratio_ablation.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --augmentation-add-ratios 0.5 1.0 2.0 --seed 42 --batch-size 32 --overwrite 2>&1 | Tee-Object -FilePath logs\\final_augmentation_ratio_ablation_top3_bs32.log
 ```
 """
 
@@ -625,6 +1025,10 @@ def build_preliminary_report(project_root: Path | None = None) -> Path:
     low_data_exists = (root / "results" / "metrics" / "final_low_data_results.csv").exists()
     augmentation_frame = _read_frame(root / "results" / "metrics" / "final_augmentation_results.csv")
     f5_exists = not augmentation_frame.empty
+    augmentation_ablation_frame = _read_frame(
+        root / "results" / "metrics" / "final_augmentation_ratio_ablation_results.csv"
+    )
+    f51_exists = not augmentation_ablation_frame.empty
     decision_exists = (root / "docs" / "final_preprocessing_decision.md").exists()
     benchmark_selection_exists = (root / "docs" / "final_benchmark_selection.md").exists()
     selected_row = _selected_stability_row(stability_frame)
@@ -632,20 +1036,20 @@ def build_preliminary_report(project_root: Path | None = None) -> Path:
 
     report_text = f"""# Wi-Fi CSI HAR Workflow Status Report
 
-This report reflects only the clean F1-F5 workflow status. Old prototype artifacts are not used as final evidence.
+This report reflects only the clean F1-F5.1 workflow status. Old prototype artifacts are not used as final evidence.
 
 ## Workflow Rules
 
 - F1 uses `preprocessing=none/raw` and `training_mode=original_epoch`.
 - F1 model selection uses validation `Macro F1`; test `Macro F1` is confirmation only.
-- F2/F3/F4/F5 use `training_mode=controlled_generalization`.
+- F2/F3/F4/F5/F5.1 use `training_mode=controlled_generalization`.
 - F2 uses the benchmark rank 1 model from F1.
 - F3 selects final preprocessing primarily by mean validation `Macro F1` across seeds.
 - Test `Macro F1` is confirmation only for preprocessing selection.
 - F4 uses benchmark top3 models by default.
 - final report should use only official final workflow outputs.
 
-{_current_official_status(benchmark_exists, f2_exists, not stability_frame.empty, low_data_exists, f5_exists, selected_preprocessing)}
+{_current_official_status(benchmark_exists, f2_exists, not stability_frame.empty, low_data_exists, f5_exists, f51_exists, selected_preprocessing)}
 
 {_dataset_section(root)}
 
@@ -663,11 +1067,15 @@ Benchmark selection document:
 
 {_augmentation_section(root)}
 
+{_augmentation_ablation_section(root)}
+
+{_augmentation_ablation_aggregate_section(root)}
+
 ## F6. Final Report
 
-F6 final report can now be generated from the official F1-F5 outputs. Test-set figures and tables above should be reused as final evidence.
+F6 final report can now be generated from the official F1-F5.1 outputs. Test-set figures and tables above should be reused as final evidence.
 
-{_next_step_section(f5_exists)}
+{_next_step_section(f51_exists)}
 """
 
     report_path.write_text(report_text, encoding="utf-8")

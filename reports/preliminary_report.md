@@ -1,12 +1,12 @@
 # Wi-Fi CSI HAR Workflow Status Report
 
-This report reflects only the clean F1-F5 workflow status. Old prototype artifacts are not used as final evidence.
+This report reflects only the clean F1-F5.1 workflow status. Old prototype artifacts are not used as final evidence.
 
 ## Workflow Rules
 
 - F1 uses `preprocessing=none/raw` and `training_mode=original_epoch`.
 - F1 model selection uses validation `Macro F1`; test `Macro F1` is confirmation only.
-- F2/F3/F4/F5 use `training_mode=controlled_generalization`.
+- F2/F3/F4/F5/F5.1 use `training_mode=controlled_generalization`.
 - F2 uses the benchmark rank 1 model from F1.
 - F3 selects final preprocessing primarily by mean validation `Macro F1` across seeds.
 - Test `Macro F1` is confirmation only for preprocessing selection.
@@ -21,6 +21,7 @@ This report reflects only the clean F1-F5 workflow status. Old prototype artifac
 - Final preprocessing selected: `moving_average_smoothing+minmax_scaling`
 - F4 low-data robustness: completed
 - F5 augmentation recovery: completed
+- F5.1 augmentation add ratio ablation: completed
 
 
 ## Dataset and Labels
@@ -169,16 +170,18 @@ Benchmark selection document:
 - At 50% training data, all benchmark top3 models remain relatively stable.
 - At 25%, model differences become clearer.
 - At 10%, the best Macro F1 retention belongs to `ResNet18` (0.7834).
+- The raw Macro F1 figure and the retention figure should be read differently: raw Macro F1 shows actual performance, while retention is normalized to each model's own 100% baseline.
+- In the retention plot, 100% training data appears as 1.0 by definition because each model is divided by its own full-data result.
 
-![Low-data robustness test Macro F1 by train ratio](../results/figures/final_low_data_macro_f1_by_ratio.png)
+![Low-data robustness raw test Macro F1 by train ratio](../results/figures/final_low_data_macro_f1_by_ratio.png)
 
-![Low-data robustness test accuracy by train ratio](../results/figures/final_low_data_accuracy_by_ratio.png)
+![Low-data robustness raw test accuracy by train ratio](../results/figures/final_low_data_accuracy_by_ratio.png)
 
-![Macro F1 retention under reduced training data](../results/figures/final_low_data_macro_f1_retention_by_ratio.png)
+![Normalized Macro F1 retention under reduced training data](../results/figures/final_low_data_macro_f1_retention_by_ratio.png)
 
 ![Macro F1 drop under reduced training data](../results/figures/final_low_data_macro_f1_drop_by_ratio.png)
 
-![Low-data robustness summary at 25% and 10%](../results/figures/final_low_data_25_10_summary.png)
+![Low-data robustness summary at 25% and 10% (raw test Macro F1)](../results/figures/final_low_data_25_10_summary.png)
 
 
 ## F5. Augmentation Recovery
@@ -205,7 +208,11 @@ Benchmark selection document:
 - Positive Macro F1 gain rows: 5; negative rows: 4; zero rows: 0.
 - Largest positive Macro F1 gain: `LeNet` at `real_ratio=0.1` (0.6676).
 - Largest negative Macro F1 gain: `ResNet101` at `real_ratio=0.1` (-0.0504).
-- Overall, augmentation improves more model/ratio pairs than it degrades.
+- This is not a clear augmentation success.
+- This is a limited and condition-dependent result.
+- The current offline_append augmentation shows partial recovery in some weak or collapsed low-data conditions, but it does not generalize as a robust universal fix for CSI HAR.
+- `LeNet` at `real_ratio=0.1` improves strongly, but this should be interpreted as recovery from a collapsed baseline rather than universal superiority.
+- By contrast, `ResNet18`, the most practical low-data model in F4, benefits only marginally at `0.5` and `0.1` and worsens at `0.25`, showing that augmentation does not reliably help already robust models.
 
 ![Offline appended augmentation Macro F1 gain by train ratio](../results/figures/final_augmentation_gain_macro_f1_by_ratio.png)
 
@@ -218,13 +225,116 @@ Benchmark selection document:
 ![Offline appended augmentation gain heatmap](../results/figures/final_augmentation_gain_heatmap.png)
 
 
+## F5.1 Augmentation Add Ratio Ablation
+
+- This ablation compares augmentation_add_ratio=0.5, 1.0, 2.0 under the same offline_append design.
+- It reuses the official final preprocessing: `moving_average_smoothing+minmax_scaling`.
+- It uses benchmark top3 models: `ResNet18`, `LeNet`, `ResNet101`.
+- It keeps the same real-ratio settings: `0.5`, `0.25`, `0.1`.
+- Each augmented result is compared only against the F4 no-augmentation baseline with the same model, same real_ratio, and same preprocessing.
+- `augmentation_add_ratio=1.0` rows come from the completed official F5 run when `source=reused_final_f5`.
+- `augmentation_add_ratio=0.5` and `2.0` rows are ablation-specific runs when `source=trained_ablation`.
+
+| model | real_ratio | augmentation_add_ratio | selected_real_train_size | synthetic_train_size | effective_train_size | no_aug_test_macro_f1 | test_macro_f1 | augmentation_gain_macro_f1 | source |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| LeNet | 0.5000 | 0.5000 | 1987 | 992 | 2979 | 0.9333 | 0.9287 | -0.0047 | trained_ablation |
+| LeNet | 0.5000 | 1.0000 | 1987 | 1987 | 3974 | 0.9333 | 0.9086 | -0.0247 | reused_final_f5 |
+| LeNet | 0.5000 | 2.0000 | 1987 | 3974 | 5961 | 0.9333 | 0.9284 | -0.0049 | trained_ablation |
+| LeNet | 0.2500 | 0.5000 | 992 | 494 | 1486 | 0.8368 | 0.8614 | 0.0246 | trained_ablation |
+| LeNet | 0.2500 | 1.0000 | 992 | 992 | 1984 | 0.8368 | 0.8444 | 0.0076 | reused_final_f5 |
+| LeNet | 0.2500 | 2.0000 | 992 | 1984 | 2976 | 0.8368 | 0.8464 | 0.0096 | trained_ablation |
+| LeNet | 0.1000 | 0.5000 | 395 | 196 | 591 | 0.0649 | 0.6764 | 0.6115 | trained_ablation |
+| LeNet | 0.1000 | 1.0000 | 395 | 395 | 790 | 0.0649 | 0.7325 | 0.6676 | reused_final_f5 |
+| LeNet | 0.1000 | 2.0000 | 395 | 790 | 1185 | 0.0649 | 0.7567 | 0.6918 | trained_ablation |
+| ResNet101 | 0.5000 | 0.5000 | 1987 | 992 | 2979 | 0.9395 | 0.9297 | -0.0098 | trained_ablation |
+| ResNet101 | 0.5000 | 1.0000 | 1987 | 1987 | 3974 | 0.9395 | 0.9175 | -0.0220 | reused_final_f5 |
+| ResNet101 | 0.5000 | 2.0000 | 1987 | 3974 | 5961 | 0.9395 | 0.9120 | -0.0275 | trained_ablation |
+| ResNet101 | 0.2500 | 0.5000 | 992 | 494 | 1486 | 0.8565 | 0.8505 | -0.0060 | trained_ablation |
+| ResNet101 | 0.2500 | 1.0000 | 992 | 992 | 1984 | 0.8565 | 0.8772 | 0.0207 | reused_final_f5 |
+| ResNet101 | 0.2500 | 2.0000 | 992 | 1984 | 2976 | 0.8565 | 0.8519 | -0.0046 | trained_ablation |
+| ResNet101 | 0.1000 | 0.5000 | 395 | 196 | 591 | 0.7372 | 0.7698 | 0.0325 | trained_ablation |
+| ResNet101 | 0.1000 | 1.0000 | 395 | 395 | 790 | 0.7372 | 0.6868 | -0.0504 | reused_final_f5 |
+| ResNet101 | 0.1000 | 2.0000 | 395 | 790 | 1185 | 0.7372 | 0.7083 | -0.0289 | trained_ablation |
+| ResNet18 | 0.5000 | 0.5000 | 1987 | 992 | 2979 | 0.9361 | 0.9486 | 0.0125 | trained_ablation |
+| ResNet18 | 0.5000 | 1.0000 | 1987 | 1987 | 3974 | 0.9361 | 0.9398 | 0.0037 | reused_final_f5 |
+| ResNet18 | 0.5000 | 2.0000 | 1987 | 3974 | 5961 | 0.9361 | 0.0649 | -0.8712 | trained_ablation |
+| ResNet18 | 0.2500 | 0.5000 | 992 | 494 | 1486 | 0.9008 | 0.8757 | -0.0251 | trained_ablation |
+| ResNet18 | 0.2500 | 1.0000 | 992 | 992 | 1984 | 0.9008 | 0.8664 | -0.0344 | reused_final_f5 |
+| ResNet18 | 0.2500 | 2.0000 | 992 | 1984 | 2976 | 0.9008 | 0.8836 | -0.0172 | trained_ablation |
+| ResNet18 | 0.1000 | 0.5000 | 395 | 196 | 591 | 0.7543 | 0.8132 | 0.0588 | trained_ablation |
+| ResNet18 | 0.1000 | 1.0000 | 395 | 395 | 790 | 0.7543 | 0.7567 | 0.0024 | reused_final_f5 |
+| ResNet18 | 0.1000 | 2.0000 | 395 | 790 | 1185 | 0.7543 | 0.7541 | -0.0002 | trained_ablation |
+
+### F5.1 Interpretation
+
+- augmentation_add_ratio=0.5: positive 5, negative 4, zero 0.
+- augmentation_add_ratio=1: positive 5, negative 4, zero 0.
+- augmentation_add_ratio=2: positive 2, negative 7, zero 0.
+- Mean augmentation_gain_macro_f1 at augmentation_add_ratio=0.5: 0.0772.
+- Mean augmentation_gain_macro_f1 at augmentation_add_ratio=1: 0.0634.
+- Mean augmentation_gain_macro_f1 at augmentation_add_ratio=2: -0.0281.
+- Mean test_macro_f1 at augmentation_add_ratio=0.5: 0.8504.
+- Mean test_macro_f1 at augmentation_add_ratio=1: 0.8367.
+- Mean test_macro_f1 at augmentation_add_ratio=2: 0.7452.
+- Best augmentation_add_ratio by condition: LeNet@0.1->2, LeNet@0.25->0.5, LeNet@0.5->0.5, ResNet101@0.1->0.5, ResNet101@0.25->1, ResNet101@0.5->0.5, ResNet18@0.1->0.5, ResNet18@0.25->2, ResNet18@0.5->0.5.
+- augmentation_add_ratio=0.5 is most often best across model/ratio conditions.
+- The most stable average gain appears at augmentation_add_ratio=0.5, while augmentation_add_ratio=2 is weakest on average.
+- Severe collapse case: `ResNet18` at `real_ratio=0.5` with augmentation_add_ratio=2 drops to test_macro_f1=0.0649.
+- Synthetic data is not simply the more the better; augmentation strength should be tuned by model and real_ratio.
+
+![Augmentation ablation raw test Macro F1 by add ratio](../results/figures/final_augmentation_ablation_macro_f1_by_add_ratio.png)
+
+![Augmentation add ratio ablation Macro F1 gain](../results/figures/final_augmentation_ablation_gain_by_add_ratio.png)
+
+![Best augmentation_add_ratio by condition](../results/figures/final_augmentation_ablation_best_add_ratio_by_condition.png)
+
+![Augmentation add ratio ablation heatmap](../results/figures/final_augmentation_ablation_heatmap.png)
+
+
+### F5.1 Aggregate Summary by augmentation_add_ratio
+
+- This aggregate layer groups only by `augmentation_add_ratio` and summarizes the full 3 models x 3 real_ratios grid.
+- Each row below aggregates across up to 9 condition rows from the official F5.1 CSV.
+
+| augmentation_add_ratio | n_conditions | mean_test_macro_f1 | std_test_macro_f1 | mean_augmentation_gain_macro_f1 | std_augmentation_gain_macro_f1 | positive_gain_rate | positive_gain_count | source mix |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 0.5000 | 9 | 0.8504 | 0.0873 | 0.0772 | 0.2020 | 55.6% | 5 | reused=0, trained=9, existing=0 |
+| 1.0000 | 9 | 0.8367 | 0.0899 | 0.0634 | 0.2277 | 55.6% | 5 | reused=9, trained=0, existing=0 |
+| 2.0000 | 9 | 0.7452 | 0.2661 | -0.0281 | 0.3925 | 22.2% | 2 | reused=0, trained=9, existing=0 |
+
+### F5.1 Aggregate Interpretation
+
+- These aggregate statistics collapse the full F5.1 grid into three augmentation_add_ratio groups, each covering up to 9 model/real_ratio conditions.
+- Highest mean_test_macro_f1: augmentation_add_ratio=0.5 (0.8504).
+- Highest mean_augmentation_gain_macro_f1: augmentation_add_ratio=0.5 (0.0772).
+- Best positive_gain_rate: augmentation_add_ratio=0.5 (55.6%, 5/9).
+- This should not be read as a clear augmentation success. The aggregate view shows limited and condition-dependent benefit rather than a robust universal fix.
+- augmentation_add_ratio=0.5 is the most stable aggregate choice: it has the highest mean test Macro F1, the highest mean Macro F1 gain, and it ties for the best positive-gain rate.
+- augmentation_add_ratio=1.0 is partially useful, but it is not the aggregate best and it improves only 5 of 9 conditions, the same positive-gain count as 0.5.
+- Higher synthetic ratio is not consistently better. The aggregate summary shows that augmentation_add_ratio=2.0 has the weakest average gain and the highest instability, indicating that over-augmentation can harm robustness.
+- The most unstable aggregate setting is augmentation_add_ratio=2 (std_augmentation_gain_macro_f1=0.3925).
+- Positive-gain rate is only 5/9 for both 0.5 and 1.0, so even the better settings should be interpreted as partial recovery, not broad success.
+- The negative result is informative: simple offline_append synthetic augmentation can help some weak or collapsed conditions, but it does not generalize as a consistently reliable solution for CSI HAR low-data robustness.
+- Even the best aggregate setting remains modest: augmentation_add_ratio=0.5 reaches mean_augmentation_gain_macro_f1 = `+0.0772`, but the standard deviation is large, so condition-level variance remains substantial.
+- This is better interpreted as an early sign of possible recovery in selected cases than as evidence that augmentation stably solves the low-data problem.
+- A likely reason is that CSI is not image-like data. Naive synthetic transforms may fail to preserve physically meaningful channel structure, and too much synthetic data can distort the training distribution.
+- CSI contains coupled structure across time, subcarriers, and antenna-pair channels, so simple noise/masking/shift/scaling transforms may not preserve the physically meaningful signal structure that defines HAR conditions.
+- Applying the same augmentation policy to all classes is also a limitation: behavior classes differ in duration, movement speed, repetition, and posture-change pattern, so class-conditional augmentation may be necessary.
+- The model dependence is equally important: models that collapse easily in low-data settings may recover from synthetic samples, but already robust models may not gain consistent benefit. This points to model-specific augmentation strength as a future requirement.
+- Future work should prioritize physics-aware augmentation, class-conditional augmentation, model-specific augmentation strength, and signal-structure-aware or environment-aware synthetic generation.
+
+![Aggregate F5.1 raw test Macro F1 and gain by augmentation_add_ratio](../results/figures/final_augmentation_ablation_add_ratio_summary_macro_f1.png)
+
+<table><tr><td align="center" valign="top" width="33%"><img src="../results/figures/final_augmentation_ablation_add_ratio_summary_gain.png" alt="Aggregate F5.1 Macro F1 gain by augmentation_add_ratio" width="100%"><br><sub>Aggregate F5.1 Macro F1 gain by augmentation_add_ratio</sub></td><td align="center" valign="top" width="33%"><img src="../results/figures/final_augmentation_ablation_add_ratio_positive_rate.png" alt="Aggregate F5.1 positive-gain rate by augmentation_add_ratio" width="100%"><br><sub>Aggregate F5.1 positive-gain rate by augmentation_add_ratio</sub></td><td align="center" valign="top" width="33%"><img src="../results/figures/final_augmentation_ablation_add_ratio_accuracy_summary.png" alt="Aggregate F5.1 raw test Accuracy by augmentation_add_ratio" width="100%"><br><sub>Aggregate F5.1 raw test Accuracy by augmentation_add_ratio</sub></td></tr></table>
+
+
 ## F6. Final Report
 
-F6 final report can now be generated from the official F1-F5 outputs. Test-set figures and tables above should be reused as final evidence.
+F6 final report can now be generated from the official F1-F5.1 outputs. Test-set figures and tables above should be reused as final evidence.
 
 ## Next Step
 
-F5 is complete, so the next step is final report regeneration and packaging from the official F1-F5 outputs.
+F5.1 is complete, so the next step is final report regeneration and packaging from the official F1-F5.1 outputs.
 
 Command:
 

@@ -57,6 +57,33 @@ def _annotate_line_points(ax, x_values: list[float], y_values: list[float]) -> N
         )
 
 
+def _normalize_multiline_text(text: str) -> str:
+    return text.replace("\\n", "\n")
+
+
+def _annotate_line_points_staggered(
+    ax,
+    x_values: list[float],
+    y_values: list[float],
+    *,
+    series_index: int = 0,
+    fontsize: int = 8,
+) -> None:
+    offsets = [(0, 8), (0, -10), (-10, 8), (10, 8), (-12, -10), (12, -10)]
+    for point_index, (x_value, y_value) in enumerate(zip(x_values, y_values)):
+        dx, dy = offsets[(series_index + point_index) % len(offsets)]
+        va = "bottom" if dy >= 0 else "top"
+        ax.annotate(
+            f"{float(y_value):.4f}",
+            (x_value, y_value),
+            textcoords="offset points",
+            xytext=(dx, dy),
+            ha="center",
+            va=va,
+            fontsize=fontsize,
+        )
+
+
 def _annotate_integer_bars(ax, bars, values: list[int]) -> None:
     for bar, value in zip(bars, values):
         ax.text(
@@ -597,27 +624,52 @@ def save_preprocessing_stability_plots(csv_path, output_dir) -> list[Path]:
         output_root / "final_preprocessing_stability_val_test_macro_f1.png",
     ]
 
-    fig, ax = plt.subplots(figsize=(10, 5.5))
+    fig, ax = plt.subplots(figsize=(10.5, 5.8))
     values = frame["mean_val_macro_f1"].astype(float).to_numpy()
     errors = frame["std_val_macro_f1"].astype(float).to_numpy()
-    bars = ax.bar(positions, values, yerr=errors, capsize=4)
-    ax.set_title("Preprocessing Stability Check (Mean Validation Macro F1)")
+    bars = ax.bar(
+        positions,
+        values,
+        width=0.62,
+        alpha=0.72,
+        edgecolor="black",
+        linewidth=0.8,
+        zorder=2,
+    )
+    ax.errorbar(
+        positions,
+        values,
+        yerr=errors,
+        fmt="o",
+        color="black",
+        ecolor="black",
+        elinewidth=1.4,
+        capsize=6,
+        capthick=1.4,
+        markersize=4,
+        zorder=4,
+    )
+    ax.set_title("Preprocessing Stability Check (Mean Validation Macro F1 with std across seeds)")
     ax.set_xlabel("Preprocessing")
     ax.set_ylabel("Mean Validation Macro F1")
     ax.set_xticks(positions)
     ax.set_xticklabels(labels)
     _rotate_x_labels_if_needed(ax, labels)
-    zoom_limits = _compute_zoom_limits(values, y_zoom=True)
-    if zoom_limits is not None:
-        ax.set_ylim(*zoom_limits)
+    lower = max(0.0, float(np.min(values - errors)) - 0.01)
+    upper = min(1.0, float(np.max(values + errors)) + 0.012)
+    if upper <= lower:
+        upper = min(1.0, lower + 0.02)
+    ax.set_ylim(lower, upper)
+    ax.grid(True, axis="y", linestyle="--", alpha=0.35, zorder=1)
     for bar, value, error in zip(bars, values, errors):
         ax.text(
             bar.get_x() + bar.get_width() / 2.0,
-            bar.get_height(),
-            f"{value:.4f}\n±{error:.4f}",
+            value + error + 0.0025,
+            _normalize_multiline_text(f"{value:.4f}\\n+-{error:.4f}"),
             ha="center",
             va="bottom",
             fontsize=8,
+            zorder=5,
         )
     fig.savefig(created_files[0], dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -762,9 +814,9 @@ def save_final_low_data_plots(csv_path, output_dir) -> list[Path]:
         if metric_col not in frame.columns:
             print(f"Warning: skipped {output_path.name} because {metric_col} is missing.")
             return
-        fig, ax = plt.subplots(figsize=(8.5, 5))
+        fig, ax = plt.subplots(figsize=(8.8, 5.3))
         all_values: list[float] = []
-        for model_name in present_models:
+        for model_index, model_name in enumerate(present_models):
             model_df = frame[frame["model"].astype(str) == model_name].copy()
             ratio_to_value = {
                 float(row["real_ratio"]): float(row[metric_col])
@@ -777,20 +829,27 @@ def save_final_low_data_plots(csv_path, output_dir) -> list[Path]:
             y_values = [ratio_to_value[ratio] for ratio in x_values]
             all_values.extend(y_values)
             ax.plot(x_values, y_values, marker="o", label=model_name)
-            _annotate_line_points(ax, x_values, y_values)
+            _annotate_line_points_staggered(
+                ax,
+                x_values,
+                y_values,
+                series_index=model_index,
+                fontsize=7,
+            )
 
         if add_reference_one:
             ax.axhline(1.0, color="black", linewidth=1.0, linestyle=":")
-        ax.set_title(title)
+        ax.set_title(_normalize_multiline_text(title))
         ax.set_xlabel("Real training data ratio")
         ax.set_ylabel(ylabel)
         ax.set_xticks(ordered_ratios)
         ax.set_xticklabels([ratio_labels[ratio] for ratio in ordered_ratios])
         zoom_limits = _compute_zoom_limits(np.asarray(all_values, dtype=float), y_zoom=True)
         if zoom_limits is not None and metric_col in {"test_macro_f1", "test_accuracy", "macro_f1_retention"}:
-            ax.set_ylim(*zoom_limits)
+            lower, upper = zoom_limits
+            ax.set_ylim(lower - 0.005, upper + 0.012)
         ax.grid(True, linestyle="--", alpha=0.4)
-        ax.legend()
+        ax.legend(loc="lower left" if metric_col == "macro_f1_retention" else "best")
         fig.savefig(output_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         created_files.append(output_path)
@@ -798,20 +857,23 @@ def save_final_low_data_plots(csv_path, output_dir) -> list[Path]:
     _plot_line_metric(
         metric_col="test_macro_f1",
         output_path=output_root / "final_low_data_macro_f1_by_ratio.png",
-        title="Low-data robustness: Test Macro F1 by train ratio",
-        ylabel="Test Macro F1",
+        title="Low-data robustness: Raw test Macro F1 by real training data ratio",
+        ylabel="Raw test Macro F1",
     )
     _plot_line_metric(
         metric_col="test_accuracy",
         output_path=output_root / "final_low_data_accuracy_by_ratio.png",
-        title="Low-data robustness: Test Accuracy by train ratio",
-        ylabel="Test Accuracy",
+        title="Low-data robustness: Raw test Accuracy by real training data ratio",
+        ylabel="Raw test Accuracy",
     )
     _plot_line_metric(
         metric_col="macro_f1_retention",
         output_path=output_root / "final_low_data_macro_f1_retention_by_ratio.png",
-        title="Macro F1 retention under reduced training data",
-        ylabel="Macro F1 retention",
+        title=(
+            "Normalized Macro F1 retention by real training data ratio\n"
+            "(100% = 1.0 by definition for each model's own full-data baseline)"
+        ),
+        ylabel="Normalized Macro F1 retention (vs each model's 100% baseline)",
         add_reference_one=True,
     )
     _plot_line_metric(
@@ -858,9 +920,9 @@ def save_final_low_data_plots(csv_path, output_dir) -> list[Path]:
                         fontsize=8,
                     )
 
-            ax.set_title("Low-data robustness summary at 25% and 10%")
+            ax.set_title("Low-data robustness summary at 25% and 10% (raw test Macro F1)")
             ax.set_xlabel("Model")
-            ax.set_ylabel("Test Macro F1")
+            ax.set_ylabel("Raw test Macro F1")
             ax.set_xticks(positions)
             ax.set_xticklabels(present_models)
             ax.legend()
@@ -1113,6 +1175,619 @@ def save_final_augmentation_plots(csv_path, output_dir) -> list[Path]:
             fig.savefig(output_root / "final_augmentation_gain_heatmap.png", dpi=200, bbox_inches="tight")
             plt.close(fig)
             created_files.append(output_root / "final_augmentation_gain_heatmap.png")
+
+    return created_files
+
+
+def save_final_augmentation_ablation_plots(csv_path, output_dir) -> list[Path]:
+    """Generate official augmentation_add_ratio ablation figures."""
+    frame = pd.read_csv(csv_path).copy()
+    output_root = Path(output_dir)
+    ensure_dir(output_root)
+
+    required_columns = [
+        "model",
+        "real_ratio",
+        "augmentation_add_ratio",
+        "test_macro_f1",
+        "augmentation_gain_macro_f1",
+    ]
+    missing_columns = [column for column in required_columns if column not in frame.columns]
+    if missing_columns:
+        print(
+            "Warning: could not generate augmentation ablation figures because required columns are missing: "
+            f"{missing_columns}"
+        )
+        return []
+
+    numeric_columns = [
+        "real_ratio",
+        "augmentation_add_ratio",
+        "test_macro_f1",
+        "augmentation_gain_macro_f1",
+    ]
+    for column in numeric_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    ordered_models = ["ResNet18", "LeNet", "ResNet101"]
+    present_models = [model for model in ordered_models if model in frame["model"].astype(str).unique()]
+    if not present_models:
+        present_models = sorted(frame["model"].astype(str).unique().tolist())
+    ordered_ratios = [0.5, 0.25, 0.1]
+    ordered_add_ratios = sorted(frame["augmentation_add_ratio"].dropna().unique().tolist())
+    ratio_labels = {0.5: "50%", 0.25: "25%", 0.1: "10%"}
+
+    created_files: list[Path] = []
+
+    def _condition_label(row: pd.Series) -> str:
+        ratio = float(row["real_ratio"])
+        ratio_label = ratio_labels.get(ratio, f"{ratio:g}")
+        return f"{row['model']} ({ratio_label})"
+
+    frame["condition_label"] = frame.apply(_condition_label, axis=1)
+    ordered_condition_labels = [
+        f"{model} ({ratio_labels.get(ratio, f'{ratio:g}')})"
+        for model in present_models
+        for ratio in ordered_ratios
+        if f"{model} ({ratio_labels.get(ratio, f'{ratio:g}')})" in frame["condition_label"].tolist()
+    ]
+    add_ratio_labels = {ratio: f"add={ratio:g}" for ratio in ordered_add_ratios}
+    color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+
+    metric_pivot = (
+        frame.pivot_table(
+            index="condition_label",
+            columns="augmentation_add_ratio",
+            values="test_macro_f1",
+            aggfunc="mean",
+        )
+        .reindex(index=ordered_condition_labels)
+    )
+    available_metric_cols = [ratio for ratio in ordered_add_ratios if ratio in metric_pivot.columns]
+    if available_metric_cols:
+        metric_pivot = metric_pivot[available_metric_cols]
+        positions = np.arange(len(metric_pivot.index))
+        width = 0.8 / max(1, len(available_metric_cols))
+        fig, ax = plt.subplots(figsize=(11.5, 5.8))
+        for idx, add_ratio in enumerate(available_metric_cols):
+            offset = (idx - (len(available_metric_cols) - 1) / 2.0) * width
+            values = metric_pivot[add_ratio].astype(float).to_numpy()
+            color = color_cycle[idx % len(color_cycle)] if color_cycle else None
+            bars = ax.bar(
+                positions + offset,
+                values,
+                width=width,
+                label=add_ratio_labels[add_ratio],
+                color=color,
+                alpha=0.82,
+                edgecolor="black",
+                linewidth=0.6,
+            )
+            for bar, value in zip(bars, values):
+                if np.isnan(value):
+                    continue
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    bar.get_height(),
+                    f"{float(value):.4f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                )
+        ax.set_title("Offline appended augmentation ablation: raw test Macro F1 by add ratio")
+        ax.set_xlabel("Model and real training data ratio")
+        ax.set_ylabel("Raw test Macro F1")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(metric_pivot.index.tolist())
+        plt.setp(ax.get_xticklabels(), rotation=20, ha="right")
+        ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+        ax.legend(title="Synthetic ratio", loc="upper right", fontsize=8)
+        output_path = output_root / "final_augmentation_ablation_macro_f1_by_add_ratio.png"
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        created_files.append(output_path)
+
+    gain_pivot = (
+        frame.pivot_table(
+            index="condition_label",
+            columns="augmentation_add_ratio",
+            values="augmentation_gain_macro_f1",
+            aggfunc="mean",
+        )
+        .reindex(index=ordered_condition_labels)
+    )
+    available_gain_cols = [ratio for ratio in ordered_add_ratios if ratio in gain_pivot.columns]
+    if available_gain_cols:
+        gain_pivot = gain_pivot[available_gain_cols]
+        positions = np.arange(len(gain_pivot.index))
+        width = 0.8 / max(1, len(available_gain_cols))
+        fig, ax = plt.subplots(figsize=(11.5, 5.8))
+        all_gain_values = gain_pivot.to_numpy(dtype=float).flatten()
+        valid_gain_values = all_gain_values[~np.isnan(all_gain_values)]
+        for idx, add_ratio in enumerate(available_gain_cols):
+            offset = (idx - (len(available_gain_cols) - 1) / 2.0) * width
+            values = gain_pivot[add_ratio].astype(float).to_numpy()
+            color = color_cycle[idx % len(color_cycle)] if color_cycle else None
+            bars = ax.bar(
+                positions + offset,
+                values,
+                width=width,
+                label=add_ratio_labels[add_ratio],
+                color=color,
+                alpha=0.82,
+                edgecolor="black",
+                linewidth=0.6,
+            )
+            for bar, value in zip(bars, values):
+                if np.isnan(value):
+                    continue
+                va = "bottom" if value >= 0 else "top"
+                y_text = value + 0.01 if value >= 0 else value - 0.015
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    y_text,
+                    f"{float(value):.4f}",
+                    ha="center",
+                    va=va,
+                    fontsize=7,
+                )
+                if float(value) <= -0.2:
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2.0,
+                        min(value, 0) - 0.05,
+                        "collapse",
+                        ha="center",
+                        va="top",
+                        fontsize=7,
+                        color="darkred",
+                        rotation=90,
+                    )
+        ax.axhline(0.0, color="black", linewidth=1.0, linestyle=":")
+        if valid_gain_values.size:
+            lower = float(valid_gain_values.min()) - 0.08
+            upper = float(valid_gain_values.max()) + 0.08
+            ax.set_ylim(lower, upper)
+        ax.set_title("Offline appended augmentation ablation: Macro F1 gain vs same-ratio F4 baseline")
+        ax.set_xlabel("Model and real training data ratio")
+        ax.set_ylabel("Augmentation gain (Macro F1)")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(gain_pivot.index.tolist())
+        plt.setp(ax.get_xticklabels(), rotation=20, ha="right")
+        ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+        ax.legend(title="Synthetic ratio", loc="upper right", fontsize=8)
+        output_path = output_root / "final_augmentation_ablation_gain_by_add_ratio.png"
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        created_files.append(output_path)
+
+    best_rows = (
+        frame.sort_values(
+            by=["condition_label", "test_macro_f1", "augmentation_gain_macro_f1"],
+            ascending=[True, False, False],
+        )
+        .groupby("condition_label", as_index=False)
+        .first()
+    )
+    fig, ax = plt.subplots(figsize=(10.5, 5.8))
+    positions = np.arange(len(best_rows))
+    best_add_ratios = best_rows["augmentation_add_ratio"].astype(float).tolist()
+    best_values = best_rows["test_macro_f1"].astype(float).to_numpy()
+    bar_colors = []
+    for add_ratio in best_add_ratios:
+        idx = available_gain_cols.index(add_ratio) if add_ratio in available_gain_cols else 0
+        bar_colors.append(color_cycle[idx % len(color_cycle)] if color_cycle else None)
+    bars = ax.bar(
+        positions,
+        best_values,
+        color=bar_colors,
+        edgecolor="black",
+        linewidth=0.6,
+    )
+    labels = best_rows["condition_label"].astype(str).tolist()
+    ax.set_title("Best augmentation_add_ratio by condition (ranked by raw test Macro F1)")
+    ax.set_xlabel("Condition")
+    ax.set_ylabel("Best raw test Macro F1")
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels)
+    plt.setp(ax.get_xticklabels(), rotation=20, ha="right")
+    for bar, value, add_ratio in zip(bars, best_values, best_add_ratios):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            bar.get_height(),
+            _normalize_multiline_text(
+                f"{float(value):.4f}\\nbest add_ratio={float(add_ratio):g}"
+            ),
+            ha="center",
+            va="bottom",
+            fontsize=7,
+        )
+    ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+    output_path = output_root / "final_augmentation_ablation_best_add_ratio_by_condition.png"
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    created_files.append(output_path)
+
+    pivot = gain_pivot.copy()
+    ordered_heatmap_cols = [ratio for ratio in ordered_add_ratios if ratio in pivot.columns]
+    if ordered_heatmap_cols:
+        pivot = pivot[ordered_heatmap_cols]
+        max_abs = np.nanmax(np.abs(pivot.to_numpy(dtype=float)))
+        color_limit = max(0.05, float(max_abs)) if not np.isnan(max_abs) else 0.05
+        fig, ax = plt.subplots(figsize=(8.8, 4.8))
+        image = ax.imshow(
+            pivot.to_numpy(dtype=float),
+            aspect="auto",
+            cmap="coolwarm",
+            vmin=-color_limit,
+            vmax=color_limit,
+        )
+        ax.set_title("Offline appended augmentation ablation heatmap (Macro F1 gain vs same-ratio baseline)")
+        ax.set_xlabel("augmentation_add_ratio")
+        ax.set_ylabel("Model + real_ratio")
+        ax.set_xticks(np.arange(len(ordered_heatmap_cols)))
+        ax.set_xticklabels([f"{ratio:g}" for ratio in ordered_heatmap_cols])
+        ax.set_yticks(np.arange(len(pivot.index)))
+        ax.set_yticklabels(pivot.index.tolist())
+        for row_idx in range(pivot.shape[0]):
+            for col_idx in range(pivot.shape[1]):
+                value = pivot.iat[row_idx, col_idx]
+                if np.isnan(value):
+                    continue
+                label = f"{float(value):.4f}"
+                if float(value) <= -0.2:
+                    label += "\ncollapse"
+                ax.text(col_idx, row_idx, label, ha="center", va="center", fontsize=8)
+        fig.colorbar(image, ax=ax, label="Augmentation gain (Macro F1)")
+        output_path = output_root / "final_augmentation_ablation_heatmap.png"
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        created_files.append(output_path)
+
+    return created_files
+
+
+def build_final_augmentation_ablation_summary_by_add_ratio(
+    results_csv_path,
+    summary_csv_path,
+) -> tuple[pd.DataFrame, Path]:
+    """Aggregate F5.1 condition-level results by augmentation_add_ratio."""
+    results_path = Path(results_csv_path)
+    summary_path = Path(summary_csv_path)
+    ensure_dir(summary_path.parent)
+
+    frame = pd.read_csv(results_path).copy()
+    required_columns = [
+        "augmentation_add_ratio",
+        "model",
+        "real_ratio",
+        "test_macro_f1",
+        "test_accuracy",
+        "augmentation_gain_macro_f1",
+        "augmentation_gain_accuracy",
+    ]
+    missing_columns = [column for column in required_columns if column not in frame.columns]
+    if missing_columns:
+        raise ValueError(
+            "Could not build augmentation ratio ablation summary because required columns are "
+            f"missing: {missing_columns}"
+        )
+
+    numeric_columns = [
+        "augmentation_add_ratio",
+        "real_ratio",
+        "test_macro_f1",
+        "test_accuracy",
+        "augmentation_gain_macro_f1",
+        "augmentation_gain_accuracy",
+    ]
+    for column in numeric_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    summary_records: list[dict[str, object]] = []
+    for add_ratio, group_df in frame.groupby("augmentation_add_ratio", dropna=True):
+        clean_group = group_df.copy()
+        positive_mask = clean_group["augmentation_gain_macro_f1"] > 0
+        source_counts = (
+            clean_group["source"].astype(str).value_counts() if "source" in clean_group.columns else pd.Series(dtype=int)
+        )
+        summary_records.append(
+            {
+                "augmentation_add_ratio": float(add_ratio),
+                "n_conditions": int(len(clean_group)),
+                "models_covered": ", ".join(sorted(clean_group["model"].dropna().astype(str).unique().tolist())),
+                "real_ratios_covered": ", ".join(
+                    f"{float(ratio):g}"
+                    for ratio in sorted(clean_group["real_ratio"].dropna().astype(float).unique().tolist(), reverse=True)
+                ),
+                "mean_test_macro_f1": float(clean_group["test_macro_f1"].mean()),
+                "std_test_macro_f1": float(clean_group["test_macro_f1"].std(ddof=1)),
+                "min_test_macro_f1": float(clean_group["test_macro_f1"].min()),
+                "max_test_macro_f1": float(clean_group["test_macro_f1"].max()),
+                "median_test_macro_f1": float(clean_group["test_macro_f1"].median()),
+                "mean_test_accuracy": float(clean_group["test_accuracy"].mean()),
+                "std_test_accuracy": float(clean_group["test_accuracy"].std(ddof=1)),
+                "mean_augmentation_gain_macro_f1": float(clean_group["augmentation_gain_macro_f1"].mean()),
+                "std_augmentation_gain_macro_f1": float(clean_group["augmentation_gain_macro_f1"].std(ddof=1)),
+                "min_augmentation_gain_macro_f1": float(clean_group["augmentation_gain_macro_f1"].min()),
+                "max_augmentation_gain_macro_f1": float(clean_group["augmentation_gain_macro_f1"].max()),
+                "median_augmentation_gain_macro_f1": float(clean_group["augmentation_gain_macro_f1"].median()),
+                "mean_augmentation_gain_accuracy": float(clean_group["augmentation_gain_accuracy"].mean()),
+                "std_augmentation_gain_accuracy": float(clean_group["augmentation_gain_accuracy"].std(ddof=1)),
+                "positive_gain_count": int(positive_mask.sum()),
+                "zero_or_negative_gain_count": int((~positive_mask).sum()),
+                "positive_gain_rate": float(positive_mask.mean()),
+                "reused_final_f5_count": int(source_counts.get("reused_final_f5", 0)),
+                "trained_ablation_count": int(source_counts.get("trained_ablation", 0)),
+                "existing_ablation_count": int(source_counts.get("existing_ablation", 0)),
+            }
+        )
+
+    summary_frame = pd.DataFrame(summary_records).sort_values(
+        by=["augmentation_add_ratio"], ascending=[True]
+    ).reset_index(drop=True)
+    summary_frame.to_csv(summary_path, index=False, encoding="utf-8")
+    return summary_frame, summary_path
+
+
+def save_final_augmentation_ablation_summary_plots(summary_csv_path, output_dir) -> list[Path]:
+    """Generate aggregate F5.1 summary plots grouped only by augmentation_add_ratio."""
+    frame = pd.read_csv(summary_csv_path).copy()
+    output_root = Path(output_dir)
+    ensure_dir(output_root)
+
+    required_columns = [
+        "augmentation_add_ratio",
+        "n_conditions",
+        "mean_test_macro_f1",
+        "std_test_macro_f1",
+        "mean_augmentation_gain_macro_f1",
+        "std_augmentation_gain_macro_f1",
+        "positive_gain_rate",
+        "mean_test_accuracy",
+        "std_test_accuracy",
+    ]
+    missing_columns = [column for column in required_columns if column not in frame.columns]
+    if missing_columns:
+        print(
+            "Warning: could not generate augmentation ablation aggregate figures because required "
+            f"columns are missing: {missing_columns}"
+        )
+        return []
+
+    for column in required_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    ordered = frame.sort_values(by=["augmentation_add_ratio"], ascending=[True]).reset_index(drop=True)
+    add_labels = [f"add={float(value):g}" for value in ordered["augmentation_add_ratio"].tolist()]
+    positions = np.arange(len(ordered))
+    color_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    created_files: list[Path] = []
+
+    def _bar_with_error(
+        ax,
+        x_positions,
+        values,
+        errors,
+        *,
+        width: float,
+        label: str,
+        color,
+    ):
+        return ax.bar(
+            x_positions,
+            values,
+            width=width,
+            label=label,
+            color=color,
+            edgecolor="black",
+            linewidth=0.6,
+            yerr=errors,
+            error_kw={"elinewidth": 1.3, "capsize": 5, "capthick": 1.3, "ecolor": "black"},
+        )
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.8, 4.8))
+    width = 0.34
+    macro_values = ordered["mean_test_macro_f1"].astype(float).to_numpy()
+    macro_errors = ordered["std_test_macro_f1"].astype(float).fillna(0.0).to_numpy()
+    gain_values = ordered["mean_augmentation_gain_macro_f1"].astype(float).to_numpy()
+    gain_errors = ordered["std_augmentation_gain_macro_f1"].astype(float).fillna(0.0).to_numpy()
+    macro_bars = _bar_with_error(
+        axes[0],
+        positions,
+        macro_values,
+        macro_errors,
+        width=0.55,
+        label="mean_test_macro_f1",
+        color=(color_cycle[0] if color_cycle else None),
+    )
+    gain_bars = _bar_with_error(
+        axes[1],
+        positions,
+        gain_values,
+        gain_errors,
+        width=0.55,
+        label="mean_augmentation_gain_macro_f1",
+        color=(color_cycle[1] if len(color_cycle) > 1 else None),
+    )
+    axes[1].axhline(0.0, color="black", linestyle=":", linewidth=1.0)
+    for ax, bars, values, errors, ylabel in [
+        (axes[0], macro_bars, macro_values, macro_errors, "Mean test Macro F1"),
+        (axes[1], gain_bars, gain_values, gain_errors, "Mean augmentation gain (Macro F1)"),
+    ]:
+        for bar, value, error in zip(bars, values, errors):
+            y_text = value + error + (0.01 if ylabel.startswith("Mean test") else 0.015)
+            va = "bottom"
+            if ylabel.startswith("Mean augmentation") and value < 0:
+                y_text = value - error - 0.03
+                va = "top"
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                y_text,
+                f"{float(value):.4f}",
+                ha="center",
+                va=va,
+                fontsize=8,
+            )
+        ax.set_xticks(positions)
+        ax.set_xticklabels(add_labels)
+        ax.set_xlabel("augmentation_add_ratio")
+        ax.set_ylabel(ylabel)
+        ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+    axes[0].set_title("Aggregate raw test Macro F1 across all 9 F5.1 conditions")
+    axes[1].set_title("Aggregate Macro F1 gain across all 9 F5.1 conditions")
+    fig.suptitle("F5.1 aggregate summary by augmentation_add_ratio (3 models x 3 real_ratios)")
+    summary_macro_path = output_root / "final_augmentation_ablation_add_ratio_summary_macro_f1.png"
+    fig.savefig(summary_macro_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    created_files.append(summary_macro_path)
+
+    fig, ax = plt.subplots(figsize=(9.0, 5.2))
+    bars = _bar_with_error(
+        ax,
+        positions,
+        gain_values,
+        gain_errors,
+        width=0.58,
+        label="mean_augmentation_gain_macro_f1",
+        color=(color_cycle[1] if len(color_cycle) > 1 else None),
+    )
+    ax.axhline(0.0, color="black", linestyle=":", linewidth=1.0)
+    y_min = float(np.min(gain_values - gain_errors))
+    y_max = float(np.max(gain_values + gain_errors))
+    lower_padding = max(0.06, (y_max - y_min) * 0.18 if y_max != y_min else 0.08)
+    upper_padding = max(0.08, (y_max - y_min) * 0.28 if y_max != y_min else 0.10)
+    ax.set_ylim(y_min - lower_padding, y_max + upper_padding)
+    for bar, value, error, rate, count in zip(
+        bars,
+        gain_values,
+        gain_errors,
+        ordered["positive_gain_rate"].astype(float).to_numpy(),
+        ordered["n_conditions"].astype(int).to_numpy(),
+    ):
+        positive_count = int(round(rate * count))
+        x_center = bar.get_x() + bar.get_width() / 2.0
+        primary_y = value + error + 0.02 if value >= 0 else value - error - 0.035
+        secondary_y = primary_y + 0.05 if value >= 0 else primary_y - 0.055
+        primary_va = "bottom" if value >= 0 else "top"
+        secondary_va = "bottom" if value >= 0 else "top"
+        ax.text(
+            x_center,
+            primary_y,
+            f"{float(value):.4f}",
+            ha="center",
+            va=primary_va,
+            fontsize=9,
+            fontweight="bold",
+            bbox={"boxstyle": "round,pad=0.14", "facecolor": "white", "alpha": 0.85, "edgecolor": "none"},
+        )
+        ax.text(
+            x_center,
+            secondary_y,
+            f"{positive_count}/{count} positive",
+            ha="center",
+            va=secondary_va,
+            fontsize=7,
+            color="dimgray",
+            bbox={"boxstyle": "round,pad=0.12", "facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+        )
+        if value < 0 and abs(value) > 0.2:
+            ax.text(
+                x_center,
+                value - error - 0.10,
+                "collapse risk",
+                ha="center",
+                va="top",
+                fontsize=7,
+                color="darkred",
+                fontweight="bold",
+            )
+        elif value < 0:
+            ax.text(
+                x_center,
+                value - error - 0.02,
+                "negative",
+                ha="center",
+                va="top",
+                fontsize=7,
+                color="dimgray",
+            )
+    ax.set_title("Aggregate augmentation gain by add ratio across all 9 conditions")
+    ax.set_xlabel("augmentation_add_ratio")
+    ax.set_ylabel("Mean augmentation gain (Macro F1)")
+    ax.set_xticks(positions)
+    ax.set_xticklabels(add_labels)
+    ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+    summary_gain_path = output_root / "final_augmentation_ablation_add_ratio_summary_gain.png"
+    fig.savefig(summary_gain_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    created_files.append(summary_gain_path)
+
+    fig, ax = plt.subplots(figsize=(8.4, 4.6))
+    rate_values = ordered["positive_gain_rate"].astype(float).to_numpy()
+    bars = ax.bar(
+        positions,
+        rate_values,
+        width=0.58,
+        color=(color_cycle[2] if len(color_cycle) > 2 else None),
+        edgecolor="black",
+        linewidth=0.6,
+    )
+    for bar, rate, count in zip(
+        bars,
+        rate_values,
+        ordered["n_conditions"].astype(int).to_numpy(),
+    ):
+        positive_count = int(round(rate * count))
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            bar.get_height() + 0.02,
+            _normalize_multiline_text(f"{rate * 100:.1f}%\n{positive_count}/{count}"),
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+    ax.set_ylim(0.0, 1.12)
+    ax.set_title("Positive-gain rate by augmentation_add_ratio (all 9 conditions)")
+    ax.set_xlabel("augmentation_add_ratio")
+    ax.set_ylabel("Positive gain rate")
+    ax.set_xticks(positions)
+    ax.set_xticklabels(add_labels)
+    ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+    summary_positive_path = output_root / "final_augmentation_ablation_add_ratio_positive_rate.png"
+    fig.savefig(summary_positive_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    created_files.append(summary_positive_path)
+
+    fig, ax = plt.subplots(figsize=(8.6, 4.8))
+    accuracy_values = ordered["mean_test_accuracy"].astype(float).to_numpy()
+    accuracy_errors = ordered["std_test_accuracy"].astype(float).fillna(0.0).to_numpy()
+    bars = _bar_with_error(
+        ax,
+        positions,
+        accuracy_values,
+        accuracy_errors,
+        width=0.58,
+        label="mean_test_accuracy",
+        color=(color_cycle[3] if len(color_cycle) > 3 else None),
+    )
+    for bar, value, error in zip(bars, accuracy_values, accuracy_errors):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            value + error + 0.01,
+            f"{float(value):.4f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+    ax.set_title("Aggregate raw test Accuracy by augmentation_add_ratio (all 9 conditions)")
+    ax.set_xlabel("augmentation_add_ratio")
+    ax.set_ylabel("Mean test Accuracy")
+    ax.set_xticks(positions)
+    ax.set_xticklabels(add_labels)
+    ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+    summary_accuracy_path = output_root / "final_augmentation_ablation_add_ratio_accuracy_summary.png"
+    fig.savefig(summary_accuracy_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    created_files.append(summary_accuracy_path)
 
     return created_files
 

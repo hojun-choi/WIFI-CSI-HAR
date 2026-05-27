@@ -138,6 +138,8 @@ Official F4 low-data outputs:
   - `results/figures/final_low_data_accuracy_by_ratio.png`
   - `results/figures/final_low_data_macro_f1_retention_by_ratio.png`
   - `results/figures/final_low_data_macro_f1_drop_by_ratio.png`
+- `final_low_data_macro_f1_by_ratio.png` shows raw test `Macro F1`.
+- `final_low_data_macro_f1_retention_by_ratio.png` shows normalized retention relative to each model's own `100%` baseline, so `100% = 1.0` by definition.
 - reports automatically embed generated figures when they exist.
 
 Official F5 augmentation outputs:
@@ -152,6 +154,47 @@ Official F5 augmentation outputs:
 - official F5 uses `augmentation_mode=offline_append`, not on-the-fly augmentation.
 - `augmentation_add_ratio=1.0` means one synthetic sample is appended for each selected real train sample.
 - reports automatically embed generated F5 figures when they exist.
+
+Augmentation add ratio ablation outputs:
+
+- result CSV: `results/metrics/final_augmentation_ratio_ablation_results.csv`
+- aggregate summary CSV: `results/metrics/final_augmentation_ratio_ablation_summary_by_add_ratio.csv`
+- figures:
+  - `results/figures/final_augmentation_ablation_macro_f1_by_add_ratio.png`
+  - `results/figures/final_augmentation_ablation_gain_by_add_ratio.png`
+  - `results/figures/final_augmentation_ablation_best_add_ratio_by_condition.png`
+  - `results/figures/final_augmentation_ablation_heatmap.png`
+  - `results/figures/final_augmentation_ablation_add_ratio_summary_macro_f1.png`
+  - `results/figures/final_augmentation_ablation_add_ratio_summary_gain.png`
+  - `results/figures/final_augmentation_ablation_add_ratio_positive_rate.png`
+  - `results/figures/final_augmentation_ablation_add_ratio_accuracy_summary.png`
+- F5.1 is completed.
+- `augmentation_add_ratio=1.0` rows were reused from the official F5 output when `source=reused_final_f5`.
+- `augmentation_add_ratio=0.5` and `2.0` rows were added as ablation-specific training rows when `source=trained_ablation`.
+- F5.1 now includes both:
+  - condition-level ablation analysis
+  - aggregate-by-`augmentation_add_ratio` summary analysis across all 9 model/ratio conditions
+- High-level result:
+  - `0.5` appears most stable on average
+  - `1.0` is partially useful but not uniformly best
+  - `2.0` is often too aggressive and can hurt CSI HAR performance
+  - augmentation showed limited and condition-dependent benefit rather than a robust universal fix
+  - F4 shows that strong low-data performance is possible, especially with `ResNet18`
+  - F5/F5.1 show that simple augmentation is only partially helpful and does not solve the low-data problem consistently
+  - future work should focus on physics-aware, class-conditional, and model-specific augmentation
+- final documentation and reports should now use the official F1-F5.1 outputs, not older prototype wording.
+
+Official command:
+
+```powershell
+python -u experiments/17_run_augmentation_ratio_ablation.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --augmentation-add-ratios 0.5 1.0 2.0 --seed 42 --batch-size 64 2>&1 | Tee-Object -FilePath logs\final_augmentation_ratio_ablation_top3.log
+```
+
+OOM fallback:
+
+```powershell
+python -u experiments/17_run_augmentation_ratio_ablation.py --use-benchmark-top3 --preprocessing moving_average_smoothing+minmax_scaling --augmentation-add-ratios 0.5 1.0 2.0 --seed 42 --batch-size 32 --overwrite 2>&1 | Tee-Object -FilePath logs\final_augmentation_ratio_ablation_top3_bs32.log
+```
 
 ## F3 Multi-seed Preprocessing Stability Check
 
